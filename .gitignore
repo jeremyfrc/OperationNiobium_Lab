@@ -83,3 +83,4 @@ public/
 /results/
 *.txt
 mandelbrot
+**/.obsidian/
