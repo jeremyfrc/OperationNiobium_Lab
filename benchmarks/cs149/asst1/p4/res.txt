@@ -1,0 +1,21 @@
+1. Report the ISPC implementation speedup for single CPU core (no tasks) and when using all cores (with tasks). What is the speedup due to SIMD parallelization? What is the speedup due to multi-core parallelization?
+[sqrt serial]:          [497.596] ms
+[sqrt ispc]:            [137.656] ms (3.61x speedup from ISPC)
+[sqrt task ispc]:       [8.266] ms   (60.20x speedup from task ISPC)
+
+
+2. Construct a specifc input that maximizes speedup over the sequential version of the code and report the resulting speedup achieved (for both the with- and without-tasks ISPC implementations). Does your modification improve SIMD speedup? Does it improve multi-core speedup (i.e., the benefit of moving from ISPC without-tasks to ISPC with tasks)? Please explain why.
+
+used 0 and 2.0 as example.
+when 0, the real time spent is quite long, and when 2.0, the real time spent is much shorter. but the improved ratio for 0 is about 5x, but for 2.0 is about 3.87x.
+--> 
+high speedup ratio does not mean real run time is more efficient, just we had some imbalanced data, and we got margin to improve the imbalance. While we have evenly distributed data for computation, such improvement margin will be much smaller.
+
+
+3.  minimizes speedup input should be 1.0, with only 1.53x speedup.
+
+4.
+[sqrt serial]:          [500.402] ms
+[sqrt ispc]:            [136.479] ms  (3.67x speedup from ISPC)
+[sqrt simd256]:         [84.690] ms   (5.91x speedup from SIMD256)
+[sqrt task ispc]:       [7.800] ms    (64.16x speedup from task ISPC)

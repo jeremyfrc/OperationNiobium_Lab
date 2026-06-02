@@ -80,7 +80,5 @@ palette.map
 # public/index.html for httpd
 public/
 *.ppm
-/results/
-*.txt
 mandelbrot
-**/.obsidian/
+objs/

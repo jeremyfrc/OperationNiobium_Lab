@@ -1,0 +1,76 @@
+[mandelbrot serial]:            [206.258] ms
+Wrote image file mandelbrot-serial.ppm
+[mandelbrot thread]:            [104.260] ms
+Wrote image file mandelbrot-thread.ppm (1.98x speedup from 2 threads)
+
+
+[mandelbrot serial]:            [205.561] ms
+Wrote image file mandelbrot-serial.ppm
+[mandelbrot thread]:            [126.849] ms
+Wrote image file mandelbrot-thread.ppm (1.62x speedup from 3 threads)
+
+
+[mandelbrot serial]:            [206.852] ms
+Wrote image file mandelbrot-serial.ppm
+[mandelbrot thread]:            [85.044] ms
+Wrote image file mandelbrot-thread.ppm (2.43x speedup from 4 threads)
+
+
+[mandelbrot serial]:            [207.120] ms
+Wrote image file mandelbrot-serial.ppm
+[mandelbrot thread]:            [84.380] ms
+Wrote image file mandelbrot-thread.ppm (2.45x speedup from 5 threads)
+
+
+[mandelbrot serial]:            [207.685] ms
+Wrote image file mandelbrot-serial.ppm
+[mandelbrot thread]:            [63.807] ms
+Wrote image file mandelbrot-thread.ppm (3.25x speedup from 6 threads)
+
+
+[mandelbrot serial]:            [207.143] ms
+Wrote image file mandelbrot-serial.ppm
+[mandelbrot thread]:            [61.459] ms
+Wrote image file mandelbrot-thread.ppm (3.37x speedup from 7 threads)
+
+
+[mandelbrot serial]:            [205.695] ms
+Wrote image file mandelbrot-serial.ppm
+[mandelbrot thread]:            [52.315] ms
+Wrote image file mandelbrot-thread.ppm (3.93x speedup from 8 threads)
+
+
+[mandelbrot serial]:            [206.270] ms
+Wrote image file mandelbrot-serial.ppm
+Thread 1 took 24.231 ms
+Thread 2 took 47.823 ms
+Thread 3 took 61.623 ms
+Thread 4 took 46.696 ms
+Thread 5 took 25.197 ms
+Thread 6 took 4.322 ms
+Thread 1 took 24.953 ms
+Thread 2 took 46.695 ms
+Thread 3 took 61.573 ms
+Thread 4 took 46.800 ms
+Thread 5 took 25.224 ms
+Thread 6 took 5.376 ms
+Thread 1 took 24.011 ms
+Thread 2 took 46.583 ms
+Thread 3 took 62.296 ms
+Thread 4 took 48.444 ms
+Thread 5 took 26.764 ms
+Thread 6 took 5.353 ms
+Thread 1 took 24.186 ms
+Thread 2 took 47.047 ms
+Thread 3 took 63.156 ms
+Thread 4 took 47.048 ms
+Thread 5 took 25.750 ms
+Thread 6 took 4.313 ms
+Thread 1 took 23.954 ms
+Thread 2 took 47.550 ms
+Thread 3 took 61.567 ms
+Thread 4 took 47.333 ms
+Thread 5 took 24.773 ms
+Thread 6 took 4.309 ms
+[mandelbrot thread]:[61.775] ms
+Wrote image file mandelbrot-thread.ppm  (3.34x speedup from 7 threads)

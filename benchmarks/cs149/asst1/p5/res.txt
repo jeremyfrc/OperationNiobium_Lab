@@ -1,0 +1,18 @@
+1. Initial situation:
+[saxpy ispc]:           [7.538] ms      [39.538] GB/s   [5.307] GFLOPS
+[saxpy task ispc]:      [3.930] ms      [75.841] GB/s   [10.179] GFLOPS
+(1.92x speedup from use of tasks)
+
+This speed up is low because of the memory bandwidth limit, or memory wall. OS reaches memory-bound very easily even with fewer core joined the arithmetic intensity computations. So it is impossible to write a linear speedup code.
+
+2. Note that the total memory bandwidth consumed computation in main.cpp is TOTAL_BYTES = 4 * N * sizeof(float);. Even though saxpy loads one element from X, one element from Y, and writes one element to result the multiplier by 4 is correct. Why is this the case?
+
+The reason here is due to the cache.
+The core loop has following computation:
+result[i] = a * x[i] + y[i]
+load x takes 4 bytes
+load y takes 4 bytes
+write back to result takes 4 bytes
+but initially need to load result as well for 4 bytes
+
+3. For significant speedup, probably need a rewrite of the code, will try it.

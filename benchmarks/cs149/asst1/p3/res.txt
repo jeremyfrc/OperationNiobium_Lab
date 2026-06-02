@@ -1,0 +1,18 @@
+1. Run mandelbrot_ispc with the parameter --tasks. What speedup do you observe on view 1? What is the speedup over the version of mandelbrot_ispc that does not partition that computation into tasks?
+total speed up is about 6x
+ispc multicore is about 1.96x
+
+changed task to 16, got:
+SIMD 3x
+ISPC multicore 6x
+total 19x
+
+
+2. There is a simple way to improve the performance of mandelbrot_ispc --tasks by changing the number of tasks the code creates. By only changing code in the function mandelbrot_ispc_withtasks(), you should be able to achieve performance that exceeds the sequential version of the code by over 32 times! How did you determine how many tasks to create? Why does the number you chose work best?
+
+in current task, I used rowsPerTask = height, because I have a 24 core CPU, it got 45x improvement or speedup. This could largely reduce the barrel effect, but there might be other factors will make this different, for example, core # vs task granularity. To further understand this, later will need to try different coding for ISPC functions.
+
+
+3. Extra Credit: (2 points) What are differences between the thread abstraction (used in Program 1) and the ISPC task abstraction? There are some obvious differences in semantics between the (create/join and (launch/sync) mechanisms, but the implications of these differences are more subtle. Here's a thought experiment to guide your answer: what happens when you launch 10,000 ISPC tasks? What happens when you launch 10,000 threads? (For this thought experiment, please discuss in the general case - i.e. don't tie your discussion to this given mandelbrot program.)
+
+Thread is more independent workers after scheduler scheduled them since they are allocated by OS kernel mostly, so it is by hardware mapping. But ISPC tasks are more like a group of ppl to work on a single complex task, whoever finished its own part, will join to work on the rest, like work stealing.

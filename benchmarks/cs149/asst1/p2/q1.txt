@@ -1,0 +1,46 @@
+./myexp -s 10000
+
+
+Vector Width:              16
+Total Vector Instructions: 27593
+Vector Utilization:        66.8%
+Utilized Vector Lanes:     294859
+Total Vector Lanes:        441488
+
+Vector Width:              8
+Total Vector Instructions: 52878
+Vector Utilization:        68.6%
+Utilized Vector Lanes:     290219
+Total Vector Lanes:        423024
+
+Vector Width:              4
+Total Vector Instructions: 97072
+Vector Utilization:        72.5%
+Utilized Vector Lanes:     281523
+Total Vector Lanes:        388288
+
+
+Vector Width:              2
+Total Vector Instructions: 167516
+Vector Utilization:        80.1%
+Utilized Vector Lanes:     268203
+Total Vector Lanes:        335032
+
+SIMD 编程三板斧通过 Program 2 的这两个任务（Exp 和 Sum），你其实已经掌握了向量化编程最核心的三个武器：Vertical Ops（纵向操作）：像 vmult、vadd，每个通道独立作战，适合处理 $y = x^n$。Masking（掩码控制）：这是 SIMD 的“灵魂”，用来在没有跳转指令的情况下模拟 if/else 和 while。Horizontal Ops（横向归约）：也就是你 Bonus 里的 arraySum。这是不同通道之间进行通信、聚合的唯一方式。
+
+
+
+1. 指令数与利用率的“跷跷板”
+观察你的数据，你会发现一个明显的趋势：
+Vector Width 增加：Total Vector Instructions 显著下降。
+Vector Width 增加：Vector Utilization 也随之下降。
+
+
+2. “木桶效应”在 SIMD 中的具象化
+你的利用率下降，本质上是因为 Divergence（分歧）：
+在 Width 2 时，两个元素“节奏不一致”的概率较小。
+在 Width 16 时，16 个元素要保持“节奏一致”非常困难
+
+
+3. Utilized Vector Lanes 为何在波动？你发现了吗？虽然 $N=10000$ 是固定的，但 Utilized Vector Lanes（真正干活的次数）却从 26.8 万增加到了 29.4 万。
+
