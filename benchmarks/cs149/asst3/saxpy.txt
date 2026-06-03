@@ -13,3 +13,24 @@ Effective BW by CUDA saxpy: 96.740 ms           [11.553 GB/s]
 CUDA saxpy kernel time: 2.200 ms                [508.027 GB/s]
 Effective BW by CUDA saxpy: 98.205 ms           [11.380 GB/s]
 
+Q1: comparison of performance vs CPU based:
+CPU version: [saxpy task ispc]:      [3.930] ms      [75.841] GB/s   [10.179] GFLOPS
+GPU version: 500+GB/s 
+almost 7x. CPU physical limit BW is about 60-95GB/s, 75 is already very good. This 7x is about the GDDR >> regular memory.
+
+Question 2. Compare and explain the difference between the results provided by two sets of timers (timing only the kernel execution vs. timing the entire process of moving data to the GPU and back in addition to the kernel execution). Are the bandwidth values observed roughly consistent with the reported bandwidths available to the different components of the machine?
+The data movement actually took longer time to complete, so the BW dropped after consider that part. Limited by PCIe bus real throughput.
+Also, BW not matching with T4 whose spec is about 32GB/s, here only 11GB/s.
+PCIe 4.0 x8 theoretical limit is 16-32GB/s, local 11GB/s is good enough.
+Pageable memory actually is the key to lower down the speed:
+int* array = new int[N]; // 这分配的是 Pageable Memory（可分页内存）
+当执行 cudaMemcpy 时，由于操作系统可能随时把这段内存交换到硬盘（虚拟内存）里，英伟达驱动为了安全，必须先在 CPU 内存里开辟一块隐秘的、不可分页的锁页内存（Pinned Memory），把你的数据拷贝一次过去，然后再通过 PCIe 发送给 GPU。
+
+used the cudaHostAlloc to improved PCIe bw to 17GB/s:
+Running 3 timing tests:
+CUDA saxpy kernel time: 3.793 ms                [294.647 GB/s]
+Effective BW by CUDA saxpy: 66.080 ms           [16.913 GB/s]
+CUDA saxpy kernel time: 2.483 ms                [450.069 GB/s]
+Effective BW by CUDA saxpy: 62.999 ms           [17.740 GB/s]
+CUDA saxpy kernel time: 2.463 ms                [453.782 GB/s]
+Effective BW by CUDA saxpy: 62.171 ms           [17.976 GB/s]
