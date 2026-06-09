@@ -13,6 +13,7 @@
 #include "CycleTimer.h"
 
 #define THREADS_PER_BLOCK 256
+#define ELEMENTS_PER_BLOCK (THREADS_PER_BLOCK * 2)
 
 
 // helper function to round an integer up to the next power of 2
@@ -25,6 +26,135 @@ static inline int nextPow2(int n) {
     n |= n >> 16;
     n++;
     return n;
+}
+
+__global__ void upSweep(int* scanArray, int offset, int strideVal, int arrayLength){
+
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    unsigned int pos = tid * strideVal;
+
+    unsigned int leftIdx = pos + offset - 1;
+    unsigned int rightIdx = pos + strideVal - 1;
+
+    if (leftIdx < arrayLength && rightIdx < arrayLength){
+        scanArray[rightIdx] += scanArray[leftIdx];
+    }
+}
+
+
+__global__ void downSweep(int* scanArray, int offset, int strideVal, int arrayLength){
+
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    unsigned int pos = tid * strideVal;
+
+    unsigned int leftIdx = pos + offset - 1;
+    unsigned int rightIdx = pos + strideVal - 1;
+
+    if (leftIdx < arrayLength && rightIdx < arrayLength){
+        int temp = scanArray[leftIdx];
+        scanArray[leftIdx] = scanArray[rightIdx];
+        scanArray[rightIdx] += temp;
+    }
+}
+
+// ============================================================================
+// KERNEL 1: 块内局部 Scan + 块总和提取 (完美对齐版)
+// ============================================================================
+__global__ void local_block_scan(int* device_data, int* block_sums, int N) {
+    // 采用标准连续局部共享内存，彻底避免循环内非线性索引漂移
+    __shared__ int s_data[ELEMENTS_PER_BLOCK];
+
+    int block_offset = blockIdx.x * ELEMENTS_PER_BLOCK;
+    int tid = threadIdx.x;
+
+    int idxA = block_offset + 2 * tid;
+    int idxB = block_offset + 2 * tid + 1;
+
+    // 1. 规整加载
+    s_data[2 * tid]     = (idxA < N) ? device_data[idxA] : 0;
+    s_data[2 * tid + 1] = (idxB < N) ? device_data[idxB] : 0;
+    __syncthreads();
+
+    // 2. Up-Sweep (Reduction) 阶段：严格在连续逻辑索引上迭代
+    int stride = 1;
+    for (int d = THREADS_PER_BLOCK; d > 0; d >>= 1) {
+        if (tid < d) {
+            int ai = stride * (2 * tid + 1) - 1;
+            int bi = stride * (2 * tid + 2) - 1;
+            s_data[bi] += s_data[ai];
+        }
+        stride *= 2;
+        __syncthreads();
+    }
+
+    // 3. 完美提取块总和，树顶雷打不动清零
+    if (tid == 0) {
+        if (block_sums != NULL) {
+            block_sums[blockIdx.x] = s_data[ELEMENTS_PER_BLOCK - 1];
+        }
+        s_data[ELEMENTS_PER_BLOCK - 1] = 0;
+    }
+    __syncthreads();
+
+    // 4. Down-Sweep 阶段
+    for (int d = 1; d <= THREADS_PER_BLOCK; d <<= 1) {
+        stride >>= 1;
+        if (tid < d) {
+            int ai = stride * (2 * tid + 1) - 1;
+            int bi = stride * (2 * tid + 2) - 1;
+            
+            int t = s_data[ai];
+            s_data[ai] = s_data[bi];
+            s_data[bi] += t;
+        }
+        __syncthreads();
+    }
+
+    // 5. 写回全局显存
+    if (idxA < N) device_data[idxA] = s_data[2 * tid];
+    if (idxB < N) device_data[idxB] = s_data[2 * tid + 1];
+}
+
+// ============================================================================
+// KERNEL 2: 全局偏移量加法 (完美对齐版)
+// ============================================================================
+__global__ void accumulate_block_offsets(int* device_data, int* block_sums, int N) {
+    if (blockIdx.x == 0) return; 
+
+    int block_offset = blockIdx.x * ELEMENTS_PER_BLOCK;
+    int tid = threadIdx.x;
+    int offset = block_sums[blockIdx.x];
+
+    int idxA = block_offset + 2 * tid;
+    int idxB = block_offset + 2 * tid + 1;
+
+    if (idxA < N) device_data[idxA] += offset;
+    if (idxB < N) device_data[idxB] += offset;
+}
+
+
+// ============================================================================
+// 递归 Multi-pass 引擎
+// ============================================================================
+void exclusive_scan_recursive(int* device_data, int length) {
+    if (length <= 1) return;
+
+    int numBlocks = (length + ELEMENTS_PER_BLOCK - 1) / ELEMENTS_PER_BLOCK;
+    
+    int* device_block_sums = NULL;
+    if (numBlocks > 1) {
+        cudaMalloc((void**)&device_block_sums, numBlocks * sizeof(int));
+    }
+
+    local_block_scan<<<numBlocks, THREADS_PER_BLOCK>>>(device_data, device_block_sums, length);
+
+    if (numBlocks > 1) {
+        exclusive_scan_recursive(device_block_sums, numBlocks);
+        accumulate_block_offsets<<<numBlocks, THREADS_PER_BLOCK>>>(device_data, device_block_sums, length);
+        cudaFree(device_block_sums);
+    }
 }
 
 // exclusive_scan --
@@ -42,6 +172,7 @@ static inline int nextPow2(int n) {
 // Also, as per the comments in cudaScan(), you can implement an
 // "in-place" scan, since the timing harness makes a copy of input and
 // places it in result
+/*
 void exclusive_scan(int* input, int N, int* result)
 {
 
@@ -53,8 +184,59 @@ void exclusive_scan(int* input, int N, int* result)
     // on the CPU.  Your implementation will need to make multiple calls
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
+    if (input != result) {
+        cudaMemcpy(result, input, N * sizeof(int), cudaMemcpyDeviceToDevice);
+    }
 
+    //round N up to the next power of 2
+    int roundedLength = nextPow2(N);
 
+    int offset = 1;
+    int maxOffset = roundedLength/2;
+
+    for (; offset <= maxOffset; offset *= 2){
+        int stride = offset * 2;
+
+        int workItems = roundedLength / stride;
+        if (workItems * stride < roundedLength) workItems++;
+
+        workItems = (workItems > 0) ? workItems: 1;
+
+        int blockCount = (workItems + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+
+        upSweep<<<blockCount, THREADS_PER_BLOCK>>>(result, offset, stride, roundedLength);
+
+        cudaDeviceSynchronize();
+    }
+
+    int identity = 0;
+    cudaMemcpy(&result[roundedLength - 1], &identity, sizeof(int), cudaMemcpyHostToDevice);
+
+    offset = roundedLength / 2;
+    while (offset >= 1){
+        int stride = offset * 2;
+
+        int workItems = roundedLength / stride;
+        if (workItems * stride < roundedLength) workItems++;
+
+        workItems = (workItems > 0) ? workItems: 1;
+
+        int blockCount = (workItems + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+
+        downSweep<<<blockCount, THREADS_PER_BLOCK>>>(result, offset, stride, roundedLength);
+
+        cudaDeviceSynchronize();
+
+        offset /= 2;
+    }
+
+}
+*/
+void exclusive_scan(int* input, int N, int* result) {
+    if (input != result) {
+        cudaMemcpy(result, input, N * sizeof(int), cudaMemcpyDeviceToDevice);
+    }
+    exclusive_scan_recursive(result, N);
 }
 
 
@@ -141,12 +323,50 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
 }
 
 
+__global__ void mark_adjacent_equals(int* inputArray, int* flagArray, int arrayLength){
+    int threadId = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadId < arrayLength - 1){
+        flagArray[threadId] = (inputArray[threadId] == inputArray[threadId + 1]) ? 1 : 0;
+    } else if (threadId == arrayLength - 1) {
+        flagArray[threadId] = 0;
+    }
+}
+
 // find_repeats --
+__global__ void extract_repeat_indices(int* flagArray, int* scanResult, int* outputArray, int arrayLength){
+    int threadId = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadId < arrayLength - 1 && flagArray[threadId] == 1){
+        outputArray[scanResult[threadId]] = threadId;
+    }
+}
 //
 // Given an array of integers `device_input`, returns an array of all
 // indices `i` for which `device_input[i] == device_input[i+1]`.
 //
 // Returns the total number of pairs found
+int find_repeats(int* device_input, int length, int* device_output) {
+    if (length <= 1) return 0;
+    const size_t intSize = sizeof(int);
+    int* deviceFlags = NULL; int* deviceScan = NULL;
+    cudaMalloc((void**)&deviceFlags, length * intSize);
+    cudaMalloc((void**)&deviceScan, length * intSize);
+    int numBlocks = (length + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+
+    mark_adjacent_equals<<<numBlocks, THREADS_PER_BLOCK>>>(device_input, deviceFlags, length);
+    exclusive_scan(deviceFlags, length, deviceScan);
+
+    int lastFlagValue = 0; int lastScanValue = 0;
+    cudaMemcpy(&lastFlagValue, &deviceFlags[length - 1], intSize, cudaMemcpyDeviceToHost);
+    cudaMemcpy(&lastScanValue, &deviceScan[length - 1], intSize, cudaMemcpyDeviceToHost);
+    int repeatCount = lastFlagValue + lastScanValue;
+
+    if (repeatCount > 0){
+        extract_repeat_indices<<<numBlocks, THREADS_PER_BLOCK>>>(deviceFlags, deviceScan, device_output, length);
+    }
+    cudaFree(deviceFlags); cudaFree(deviceScan);
+    return repeatCount;
+}
+/*
 int find_repeats(int* device_input, int length, int* device_output) {
 
     // CS149 TODO:
@@ -160,10 +380,52 @@ int find_repeats(int* device_input, int length, int* device_output) {
     // exclusive_scan function with them. However, your implementation
     // must ensure that the results of find_repeats are correct given
     // the actual array length.
+    const size_t intSize = sizeof(int);
+    int repeatCount = 0;
+    int lastFlagValue = 0;
+    int lastScanValue = 0;
+    
+    int* deviceFlags = NULL;
+    cudaMalloc((void**)&deviceFlags, length * intSize);
+    cudaMemset(deviceFlags, 0, length * intSize);
 
-    return 0; 
+    int numBlocks = (length + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+    dim3 blockDim(THREADS_PER_BLOCK);
+    dim3 gridDim(numBlocks);
+
+    //step1: launch kernel to mark repeating elements
+    mark_adjacent_equals<<<gridDim, blockDim>>>(device_input, deviceFlags, length);
+    cudaDeviceSynchronize();
+
+    int* deviceScan = NULL;
+    cudaMalloc((void**)&deviceScan, length * intSize);
+
+    //step2: perform exclusive scan on flags to determine output positions
+    //uses the exclusive_scan function
+    exclusive_scan(deviceFlags, length, deviceScan);
+
+    //step3: calculate total number of repeats by reading scan results
+    if (length > 0){
+        //copy last flag and last scan value from device to host
+        cudaMemcpy(&lastFlagValue, &deviceFlags[length-1], intSize, cudaMemcpyDeviceToHost);
+        cudaMemcpy(&lastScanValue, &deviceScan[length-1], intSize, cudaMemcpyDeviceToHost);
+
+        repeatCount = lastFlagValue + lastScanValue;
+    }
+
+    //step4: only process output array if found repeats
+    if (repeatCount > 0){
+        extract_repeat_indices<<<gridDim, blockDim>>>(deviceFlags, deviceScan, device_output, length);
+        cudaDeviceSynchronize();
+    }
+
+    //step5: clean up temporary device memory
+    cudaFree(deviceFlags);
+    cudaFree(deviceScan);
+
+    return repeatCount;
 }
-
+*/
 
 //
 // cudaFindRepeats --
