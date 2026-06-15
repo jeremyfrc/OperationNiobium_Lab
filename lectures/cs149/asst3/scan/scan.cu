@@ -136,7 +136,7 @@ __global__ void accumulate_block_offsets(int* device_data, int* block_sums, int 
 
 
 // ============================================================================
-// 递归 Multi-pass 引擎
+// 递归 Multi-pass 引擎 recursive scan
 // ============================================================================
 void exclusive_scan_recursive(int* device_data, int length) {
     if (length <= 1) return;
