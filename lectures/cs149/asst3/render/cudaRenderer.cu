@@ -427,6 +427,350 @@ __global__ void kernelRenderCircles() {
     }
 }
 
+__global__ void renderTileKernel() 
+{
+    short imageWidth = cuConstRendererParams.imageWidth;
+    short imageHeight = cuConstRendererParams.imageHeight;
+    int numCircles = cuConstRendererParams.numCircles;
+
+    int tileMinX = blockIdx.x * 16;
+    int tileMinY = blockIdx.y * 16;
+
+    __shared__ int sharedCircleId[256];
+    __shared__ int sharedCircleCount;
+    __shared__ int scratch[256]; // 🌟 新增：用于保序排队的分账本
+
+    if (threadIdx.x == 0) {
+        sharedCircleCount = 0;
+    }
+    __syncthreads();
+
+    for (int i = 0; i < numCircles; i += 256) {
+        
+        int circleId = i + threadIdx.x;
+        bool intersects = false;
+
+        if (circleId < numCircles) {
+            int index3 = 3 * circleId;
+            float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
+            float  rad = cuConstRendererParams.radius[circleId];
+
+            short minX = static_cast<short>(imageWidth * (p.x - rad));
+            short maxX = static_cast<short>(imageWidth * (p.x + rad)) + 1;
+            short minY = static_cast<short>(imageHeight * (p.y - rad));
+            short maxY = static_cast<short>(imageHeight * (p.y + rad)) + 1;
+
+            intersects = (minX < tileMinX + 16) && (maxX > tileMinX) &&
+                         (minY < tileMinY + 16) && (maxY > tileMinY);
+        }
+
+        // ------------------------------------------------------------
+        // 🌟【核心修正：利用局部 Exclusive Scan 替代 atomicAdd】
+        // ------------------------------------------------------------
+        // 每个线程把自己的命中状态（1或0）写入分账本
+        scratch[threadIdx.x] = intersects ? 1 : 0;
+        __syncthreads(); // 必须等大家都写完
+
+        // 让 0 号带头大哥出来，串行做一次绝对保序的前缀和计算
+        if (threadIdx.x == 0) {
+            int prefixSum = 0;
+            for (int t = 0; t < 256; ++t) {
+                int badge = scratch[t];
+                scratch[t] = prefixSum; // 记下线程 t 应该分到的有序槽位 (slot)
+                prefixSum += badge;
+            }
+            sharedCircleCount = prefixSum; // 这一批次落入本 Tile 的圆的总数
+        }
+        __syncthreads(); // 确保大哥算完了，大家都拿到了自己的排队号
+
+        // 严格按照原有的 circleId 顺序填入真正的共享仓库
+        if (intersects) {
+            int slot = scratch[threadIdx.x]; // 从分账本直接读取属于自己的、保序的 slot
+            sharedCircleId[slot] = circleId;
+        }
+        __syncthreads(); // 吹哨：等所有人装填完毕，再开辟下一阶段的画画大军
+
+        // ------------------------------------------------------------
+        // 【阶段二：角色切换，原地死守像素点，泼墨画画】
+        // ------------------------------------------------------------
+        int localX = threadIdx.x % 16;
+        int localY = threadIdx.x / 16;
+        int pixelX = tileMinX + localX;
+        int pixelY = tileMinY + localY;
+
+        if (pixelX < imageWidth && pixelY < imageHeight) {
+            float invWidth = 1.f / imageWidth;
+            float invHeight = 1.f / imageHeight;
+
+            float2 pixelCenterNorm = make_float2(
+                invWidth * (static_cast<float>(pixelX) + 0.5f),
+                invHeight * (static_cast<float>(pixelY) + 0.5f)
+            );
+
+            float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelY * imageWidth + pixelX)]);
+
+            for (int j = 0; j < sharedCircleCount; ++j) {
+                int actualCircleId = sharedCircleId[j];
+                int actualIndex3 = 3 * actualCircleId;
+                float3 p = *(float3*)(&cuConstRendererParams.position[actualIndex3]);
+
+                shadePixel(actualCircleId, pixelCenterNorm, p, imgPtr);
+            }
+        }
+
+        // 【阶段三：打扫战场，迎接下一批】
+        __syncthreads(); 
+        if (threadIdx.x == 0) {
+            sharedCircleCount = 0; 
+        }
+        __syncthreads(); 
+    }
+}
+
+__global__ void renderTileKernel_V2() 
+{
+    short imageWidth = cuConstRendererParams.imageWidth;
+    short imageHeight = cuConstRendererParams.imageHeight;
+    int numCircles = cuConstRendererParams.numCircles;
+
+    int tileMinX = blockIdx.x * 16;
+    int tileMinY = blockIdx.y * 16;
+
+    __shared__ int sharedCircleId[256];
+    __shared__ int sharedCircleCount;
+    
+    // 🌟 核心改动：只需要 8 个槽位存放每个 Warp 的局部总数
+    __shared__ int warpOffsets[8]; 
+
+    // ------------------------------------------------------------
+    // 🌟 杀招 1：寄存器颜色缓存 (Register Caching)
+    // ------------------------------------------------------------
+    // 把像素定位拉到最外层！让每个线程终身守护一个固定的像素点
+    int localX = threadIdx.x % 16;
+    int localY = threadIdx.x / 16;
+    int pixelX = tileMinX + localX;
+    int pixelY = tileMinY + localY;
+
+    float4 localPixelColor = make_float4(0.f, 0.f, 0.f, 0.f);
+    bool validPixel = (pixelX < imageWidth && pixelY < imageHeight);
+    float4* imgPtr = nullptr;
+
+    if (validPixel) {
+        imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelY * imageWidth + pixelX)]);
+        localPixelColor = *imgPtr; // 🚀 整个 Kernel 终生只读一次全局显存！
+    }
+
+    // 算出当前线程在它所在的 Warp 内部的硬件编号 (0~31) 以及属于第几个 Warp (0~7)
+    int laneId = threadIdx.x & 31;  // 等价于 threadIdx.x % 32
+    int warpId = threadIdx.x >> 5;  // 等价于 threadIdx.x / 32
+
+    for (int i = 0; i < numCircles; i += 256) {
+        
+        int circleId = i + threadIdx.x;
+        bool intersects = false;
+
+        if (circleId < numCircles) {
+            int index3 = 3 * circleId;
+            float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
+            float  rad = cuConstRendererParams.radius[circleId];
+
+            short minX = static_cast<short>(imageWidth * (p.x - rad));
+            short maxX = static_cast<short>(imageWidth * (p.x + rad)) + 1;
+            short minY = static_cast<short>(imageHeight * (p.y - rad));
+            short maxY = static_cast<short>(imageHeight * (p.y + rad)) + 1;
+
+            intersects = (minX < tileMinX + 16) && (maxX > tileMinX) &&
+                         (minY < tileMinY + 16) && (maxY > tileMinY);
+        }
+
+        // ------------------------------------------------------------
+        // 🌟 杀招 2：利用 Warp 原生指令进行超高性能并行 Scan (Compaction)
+        // ------------------------------------------------------------
+        // 硬件级内置投票，一句话光速拿到当前 Warp 32个线程的命中状态掩码
+        unsigned int mask = 0xffffffff;
+        unsigned int ballot = __ballot_sync(mask, intersects ? 1 : 0);
+
+        // 用 __popc 硬件指令，开挂般算出“在我前面的兄弟里有多少个人命中了” (Warp内独占前缀和)
+        int laneOffset = __popc(ballot & ((1U << laneId) - 1));
+        int warpTotal  = __popc(ballot); // 这个 Warp 内部总共有多少人命中
+
+        // 每个 Warp 的 0 号执行官出来，把本组总数写到共享账本
+        if (laneId == 0) {
+            warpOffsets[warpId] = warpTotal;
+        }
+        __syncthreads(); // 等待 8 个 Warp 汇报完毕
+
+        // 此时账本里只有 8 个数！让 0 号线程串行扫一下这 8 个数，只需 8 步！开销趋近于 0
+        if (threadIdx.x == 0) {
+            int sum = 0;
+            for (int w = 0; w < 8; ++w) {
+                int val = warpOffsets[w];
+                warpOffsets[w] = sum; // 转换成每个 Warp 在大仓库里的起始偏置
+                sum += val;
+            }
+            sharedCircleCount = sum;
+        }
+        __syncthreads(); // 确保偏置大账本算完
+
+        // 绝对保序、无冲突、自适应地排队写入 Shared Memory 核心仓库
+        if (intersects) {
+            int slot = warpOffsets[warpId] + laneOffset;
+            sharedCircleId[slot] = circleId;
+        }
+        __syncthreads(); // 吹哨：等仓库装填完毕
+
+        // ------------------------------------------------------------
+        // 【阶段二：泼墨画画】直接对寄存器 localPixelColor 进行高频疯狂操作！
+        // ------------------------------------------------------------
+        if (validPixel) {
+            float invWidth = 1.f / imageWidth;
+            float invHeight = 1.f / imageHeight;
+
+            float2 pixelCenterNorm = make_float2(
+                invWidth * (static_cast<float>(pixelX) + 0.5f),
+                invHeight * (static_cast<float>(pixelY) + 0.5f)
+            );
+
+            for (int j = 0; j < sharedCircleCount; ++j) {
+                int actualCircleId = sharedCircleId[j];
+                int actualIndex3 = 3 * actualCircleId;
+                float3 p = *(float3*)(&cuConstRendererParams.position[actualIndex3]);
+
+                // 🚀 核心：传入寄存器变量的指针！所有的读写全部发生在极速的通用寄存器上
+                shadePixel(actualCircleId, pixelCenterNorm, p, &localPixelColor);
+            }
+        }
+
+        // 【阶段三：打扫战场】迎接下一批圆
+        __syncthreads(); 
+    }
+
+    // ------------------------------------------------------------
+    // 🌟 功德圆满：整个 Kernel 彻底结束前，把寄存器里的最终颜色一次性敲回全局显存
+    // ------------------------------------------------------------
+    if (validPixel) {
+        *imgPtr = localPixelColor; // 🚀 整个 Kernel 终生只写一次全局显存！
+    }
+}
+
+
+__global__ void binCirclesCountKernel(int* tileCircleCount, int numCircles, int imageWidth, int imageHeight, int numTilesX) {
+    int circleId = blockIdx.x * blockDim.x + threadIdx.x;
+    if (circleId >= numCircles) return;
+
+    // 读取圆的边界
+    int index3 = 3 * circleId;
+    float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
+    float  rad = cuConstRendererParams.radius[circleId];
+
+    int minTileX = max(0, (int)(imageWidth * (p.x - rad)) / 16);
+    int maxTileX = min(numTilesX - 1, (int)(imageWidth * (p.x + rad)) / 16);
+    int minTileY = max(0, (int)(imageHeight * (p.y - rad)) / 16);
+    int maxTileY = min(numTilesY - 1, (int)(imageHeight * (p.y + rad)) / 16);
+
+    // 疯狂记账
+    for (int ty = minTileY; ty <= maxTileY; ++ty) {
+        for (int tx = minTileX; tx <= maxTileX; ++tx) {
+            int tileId = ty * numTilesX + tx;
+            atomicAdd(&tileCircleCount[tileId], 1); // 全局原子原子加
+        }
+    }
+}
+
+__global__ void binCirclesScatterKernel(const int* tileOffsets, int* tileCounters, int* binnedCircleIds, int numCircles, int imageWidth, int imageHeight, int numTilesX) {
+    int circleId = blockIdx.x * blockDim.x + threadIdx.x;
+    if (circleId >= numCircles) return;
+
+    int index3 = 3 * circleId;
+    float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
+    float  rad = cuConstRendererParams.radius[circleId];
+
+    int minTileX = max(0, (int)(imageWidth * (p.x - rad)) / 16);
+    int maxTileX = min(numTilesX - 1, (int)(imageWidth * (p.x + rad)) / 16);
+    int minTileY = max(0, (int)(imageHeight * (p.y - rad)) / 16);
+    int maxTileY = min(numTilesY - 1, (int)(imageHeight * (p.y + rad)) / 16);
+
+    for (int ty = minTileY; ty <= maxTileY; ++ty) {
+        for (int tx = minTileX; tx <= maxTileX; ++tx) {
+            int tileId = ty * numTilesX + tx;
+            
+            // 抢夺该 Tile 内部的局部偏移号
+            int localSlot = atomicAdd(&tileCounters[tileId], 1);
+            
+            // 绝对位置 = 该 Tile 的全局起点 + 抢到的局部槽位
+            int globalSlot = tileOffsets[tileId] + localSlot;
+            binnedCircleIds[globalSlot] = circleId;
+        }
+    }
+}
+
+__global__ void renderTileBinningKernel(const int* tileOffsets, const int* tileCircleCount, const int* binnedCircleIds) {
+    short imageWidth = cuConstRendererParams.imageWidth;
+    short imageHeight = cuConstRendererParams.imageHeight;
+
+    int tileID = blockIdx.y * gridDim.x + blockIdx.x;
+    int myOffset = tileOffsets[tileID];
+    int myCircleCount = tileCircleCount[tileID];
+
+    // 如果这个格子根本没有圆，全家原地光速下班！(秒杀 rgb / 空白场景)
+    if (myCircleCount == 0) return; 
+
+    // 初始化守护像素的寄存器颜色
+    int localX = threadIdx.x;
+    int localY = threadIdx.y;
+    int pixelX = blockIdx.x * 16 + localX;
+    int pixelY = blockIdx.y * 16 + localY;
+
+    float4 localPixelColor = make_float4(0.f, 0.f, 0.f, 0.f);
+    bool validPixel = (pixelX < imageWidth && pixelY < imageHeight);
+    float4* imgPtr = nullptr;
+
+    if (validPixel) {
+        imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelY * imageWidth + pixelX)]);
+        localPixelColor = *imgPtr;
+    }
+
+    __shared__ int sharedCircleId[256];
+    int threadLinearId = localY * 16 + localX; // 0 ~ 255
+
+    // 以 256 为步长，分批把属于这个 Tile 的有序圆 ID 运进共享内存
+    for (int i = 0; i < myCircleCount; i += 256) {
+        
+        int loadIndex = i + threadLinearId;
+        if (loadIndex < myCircleCount) {
+            sharedCircleId[threadLinearId] = binnedCircleIds[myOffset + loadIndex];
+        }
+        __syncthreads(); // 确保这一批圆 ID 全运进来了
+
+        // 确定这一批运进来的实际有效数量
+        int currentBatchCount = min(256, myCircleCount - i);
+
+        // 原地高频高吞吐量画画
+        if (validPixel) {
+            float invWidth = 1.f / imageWidth;
+            float invHeight = 1.f / imageHeight;
+            float2 pixelCenterNorm = make_float2(
+                invWidth * (static_cast<float>(pixelX) + 0.5f),
+                invHeight * (static_cast<float>(pixelY) + 0.5f)
+            );
+
+            for (int j = 0; j < currentBatchCount; ++j) {
+                int actualCircleId = sharedCircleId[j];
+                int actualIndex3 = 3 * actualCircleId;
+                float3 p = *(float3*)(&cuConstRendererParams.position[actualIndex3]);
+
+                shadePixel(actualCircleId, pixelCenterNorm, p, &localPixelColor);
+            }
+        }
+        __syncthreads(); // 等大家都画完这一批，再运下一批
+    }
+
+    // 终生只写一次全局显存
+    if (validPixel) {
+        *imgPtr = localPixelColor;
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -454,7 +798,7 @@ CudaRenderer::~CudaRenderer() {
 
     if (position) {
         delete [] position;
-        delete [] velocity;
+        delete [] velocity;  
         delete [] color;
         delete [] radius;
     }
@@ -638,8 +982,50 @@ CudaRenderer::render() {
 
     // 256 threads per block is a healthy number
     dim3 blockDim(256, 1);
-    dim3 gridDim((numCircles + blockDim.x - 1) / blockDim.x);
+    // dim3 gridDim((numCircles + blockDim.x - 1) / blockDim.x);
+    dim3 gridDim((image->width + 15) / 16, (image->height + 15) / 16);
 
-    kernelRenderCircles<<<gridDim, blockDim>>>();
+    // kernelRenderCircles<<<gridDim, blockDim>>>();
+    // renderTileKernel<<<gridDim, blockDim>>>();
+    renderTileKernel_V2<<<gridDim, blockDim>>>();
     cudaDeviceSynchronize();
 }
+
+
+// void CudaRenderer::render(const CrCircles& circles) {
+
+//     int numTilesX = (imageWidth + 15) / 16;
+//     int numTilesY = (imageHeight + 15) / 16;
+//     int numTiles = numTilesX * numTilesY;
+
+//     // 【1】清空账本
+//     cudaMemset(d_tileCircleCount, 0, numTiles * sizeof(int));
+
+//     // 【2】Pass 1: 统计每个 Tile 里面有多少个圆
+//     int blocksPerGridCircles = (numCircles + 255) / 256;
+//     binCirclesCountKernel<<<blocksPerGridCircles, 256>>>(d_tileCircleCount, numCircles, imageWidth, imageHeight, numTilesX);
+//     cudaDeviceSynchronize();
+
+//     // 【3】Pass 2: 前缀和（这里可以直接借用你之前写的独占前缀和，或者用 Thrust 库快速实现）
+//     // 假设你把前缀和结果做完了，顺便把最后一个元素的 偏移量+数量（即总交叉数）拿回了 Host 端的变量 totalIntersections
+//     int totalIntersections = invokeYourExclusiveScan(d_tileCircleCount, d_tileOffsets, numTiles);
+
+//     // 【4】动态申请大仓库（如果 totalIntersections 为 0 直接退出）
+//     if (totalIntersections == 0) return;
+//     int* d_binnedCircleIds;
+//     cudaMalloc(&d_binnedCircleIds, totalIntersections * sizeof(int));
+
+//     // 【5】Pass 3: 散射填装仓库
+//     cudaMemset(d_tileCounters, 0, numTiles * sizeof(int));
+//     binCirclesScatterKernel<<<blocksPerGridCircles, 256>>>(d_tileOffsets, d_tileCounters, d_binnedCircleIds, numCircles, imageWidth, imageHeight, numTilesX);
+//     cudaDeviceSynchronize();
+
+//     // 【6】Pass 4: 终极降维打击画画
+//     dim3 blockDim(16, 16);
+//     dim3 gridDim(numTilesX, numTilesY);
+//     renderTileBinningKernel<<<gridDim, blockDim>>>(d_tileOffsets, d_tileCircleCount, d_binnedCircleIds);
+//     cudaDeviceSynchronize();
+
+//     // 【7】释放大仓库
+//     cudaFree(d_binnedCircleIds);
+// }
