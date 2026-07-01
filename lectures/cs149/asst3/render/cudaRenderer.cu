@@ -653,7 +653,7 @@ __global__ void renderTileKernel_V2()
     }
 }
 
-
+/*
 __global__ void binCirclesCountKernel(int* tileCircleCount, int numCircles, int imageWidth, int imageHeight, int numTilesX) {
     int circleId = blockIdx.x * blockDim.x + threadIdx.x;
     if (circleId >= numCircles) return;
@@ -703,6 +703,7 @@ __global__ void binCirclesScatterKernel(const int* tileOffsets, int* tileCounter
         }
     }
 }
+*/
 
 __global__ void renderTileBinningKernel(const int* tileOffsets, const int* tileCircleCount, const int* binnedCircleIds) {
     short imageWidth = cuConstRendererParams.imageWidth;
