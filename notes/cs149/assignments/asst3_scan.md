@@ -66,10 +66,3 @@ base: length<=1 return
 block_nums自己也可能超过一个块 --> 同样问题 --> 递归。
 **一句话总结：** 1) 局部 --> 汇总递归 3) --> 回填 2)。 find_repeats的flag -> scan -> scatter同壳
 
-
-
-
-
-
-
-
