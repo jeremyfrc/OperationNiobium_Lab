@@ -83,3 +83,4 @@ public/
 mandelbrot
 objs/
 logs/
+.ruff_cache/
