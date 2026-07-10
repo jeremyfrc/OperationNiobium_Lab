@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cmath>
+#include <cstdio>
 #include <cuda_runtime.h>
 
 // ---------------------------------------------------------
@@ -62,9 +63,9 @@ int main() {
 
     // 2. Device 端：cudaMalloc / memcpy
     float *d_A, *d_B, *d_C;
-    cudaMalloc(&d_A, bytes);
-    cudaMalloc(&d_B, bytes);
-    cudaMalloc(&d_C, bytes);
+    cudaMalloc(((void**)&d_A), bytes);
+    cudaMalloc(((void**)&d_B), bytes);
+    cudaMalloc(((void**)&d_C), bytes);
 
     cudaMemcpy(d_A, h_A, bytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, h_B, bytes, cudaMemcpyHostToDevice);
@@ -81,9 +82,16 @@ int main() {
     matmul_cpu(h_A, h_B, h_C_cpu, N, N, N);
 
     if (verify_result(h_C_cpu, h_C_gpu, N * N)) {
-        std::cout << "Success! GPU results match CPU baseline.\n";
+        printf("Success! GPU results match CPU baseline.\n");
     }
 
     // 释放内存...
+    cudaFree(d_A);
+    cudaFree(d_B);
+    cudaFree(d_C);
+    delete[] h_A;
+    delete[] h_B;
+    delete[] h_C_cpu;
+    delete[] h_C_gpu;
     return 0;
 }
