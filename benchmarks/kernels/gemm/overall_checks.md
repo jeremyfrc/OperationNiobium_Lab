@@ -43,16 +43,22 @@ gld efficiency           2 sectors
 
 ### checkpoints:
 
-[ ] 两个 __syncthreads() 各在哪里？为什么都需要？
-[ ] As 和 Bs 的加载各自 coalesced 吗？（各自分析 warp 访问地址）
-[ ] N 非 TILE_DIM 整数倍时会越界 → 加一行 if fix
-[ ] ncu 三数 vs Stage 0 对比：old efficiency 上来了多少？
-[ ] shared__ float As[T][T], Bs[T][T]; （T = TILE_WIDTH = 16）
-[ ] 外层 loop m = 0..N/T-1：每轮一个 tile
-[ ] 每 thread load：As[ty][tx] = A[row*N + m*T + tx]; Bs[ty][tx] = B[(m*T + ty)*N + Col];
-[ ] 内层 for k=0..T-1：Pvalue += As[ty][k] * Bs[k][tx];
-[ ] __syncthreads(); ← compute 结束后（防下一轮 load 踩脏 shmem）
-[ ] loop 结束后 C[row*N + Col] = Pvalue（只写一次）
+[X] 两个 __syncthreads() 各在哪里？为什么都需要？
+[X] As 和 Bs 的加载各自 coalesced 吗？（各自分析 warp 访问地址
+[X] N 非 TILE_DIM 整数倍时会越界 → 加一行 if fix
+[X] ncu 三数 vs Stage 0 对比：old efficiency 上来了多少？
+[X] shared__ float As[T][T], Bs[T][T]; （T = TILE_WIDTH = 16）
+[X] 外层 loop m = 0..N/T-1：每轮一个 tile
+[X] 每 thread load：As[ty][tx] = A[row*N + m*T + tx]; Bs[ty][tx] = B[(m*T + ty)*N + Col];
+[X] 内层 for k=0..T-1：Pvalue += As[ty][k] * Bs[k][tx];
+[X] __syncthreads(); ← compute 结束后（防下一轮 load 踩脏 shmem）
+[X] loop 结束后 C[row*N + Col] = Pvalue（只写一次）
+
+得到的三数是：
+Compute (SM) Throughput  95.18%
+Memory Throughput        95.18%
+Achieved Occupancy       96.44%
+divergence               100%
 
 ---
 
@@ -72,6 +78,6 @@ ncu --metrics achieved_occupancy,\
 分析：现在是 compute-bound 还是 memory-bound？
 （roofline：测 achieved TFLOP/s，与 CGMA * bandwidth 比较）
 
-[ ] load A 越界补零：`As[ty][tx] = (Row < N && m*T+tx < N) ? A[...] : 0.f;`
-[ ] load B 同理
-[ ] 测试 N=1000
+[X] load A 越界补零：`As[ty][tx] = (Row < N && m*T+tx < N) ? A[...] : 0.f;`
+[X] load B 同理
+[X] 测试 N=1000

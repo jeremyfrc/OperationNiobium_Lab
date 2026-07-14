@@ -1,25 +1,23 @@
-`ncu -k matmul_naive -c 1 --set basic ./gemm_naive`
+`ncu -k matmul_tiled -c 1 --set basic ./gemm_tiled`
 
-==PROF== Connected to process 54427 (/home/frc28/OperationNiobium_Lab/kernels/gemm/gemm_naive)
-==PROF== Profiling "matmul_naive": 0%....50%....100% - 9 passes
-Success! GPU results match CPU baseline.
-==PROF== Disconnected from process 54427
-[54427] gemm_naive@127.0.0.1
-  matmul_naive(float *, float *, float *, int, int, int) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 12.0
+Verification SUCCESS! GPU results match CPU baseline.
+==PROF== Disconnected from process 133488
+[133488] gemm_tiled@127.0.0.1
+  matmul_tiled(float *, float *, float *, int, int, int) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 12.0
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         8.99
-    SM Frequency                    Mhz       928.83
-    Elapsed Cycles                cycle      2445064
-    Memory Throughput                 %        94.50
-    DRAM Throughput                   %         0.73
-    Duration                         ms         2.55
-    L1/TEX Cache Throughput           %        95.55
-    L2 Cache Throughput               %        23.48
-    SM Active Cycles              cycle   2344583.95
-    Compute (SM) Throughput           %        94.50
+    SM Frequency                    Mhz       935.66
+    Elapsed Cycles                cycle      1834979
+    Memory Throughput                 %        95.18
+    DRAM Throughput                   %         0.98
+    Duration                         ms         1.89
+    L1/TEX Cache Throughput           %        96.02
+    L2 Cache Throughput               %        20.87
+    SM Active Cycles              cycle   1750615.12
+    Compute (SM) Throughput           %        95.18
     ----------------------- ----------- ------------
 
     INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of the device.
@@ -35,11 +33,11 @@ Success! GPU results match CPU baseline.
     Cluster Size                                                   0
     Function Cache Configuration                     CachePreferNone
     Grid Size                                                   4096
-    Registers Per Thread             register/thread              40
-    Shared Memory Configuration Size           Kbyte           16.38
+    Registers Per Thread             register/thread              38
+    Shared Memory Configuration Size           Kbyte           65.54
     Driver Shared Memory Per Block       Kbyte/block            1.02
     Dynamic Shared Memory Per Block       byte/block               0
-    Static Shared Memory Per Block        byte/block               0
+    Static Shared Memory Per Block       Kbyte/block            2.05
     # SMs                                         SM              60
     Stack Size                                                  1024
     Threads                                   thread         1048576
@@ -60,39 +58,39 @@ Success! GPU results match CPU baseline.
     Block Limit Barriers                  block           24
     Block Limit SM                        block           24
     Block Limit Registers                 block            6
-    Block Limit Shared Mem                block           16
+    Block Limit Shared Mem                block           21
     Block Limit Warps                     block            6
     Theoretical Active Warps per SM        warp           48
     Theoretical Occupancy                     %          100
-    Achieved Occupancy                        %        96.37
-    Achieved Active Warps Per SM           warp        46.26
+    Achieved Occupancy                        %        96.44
+    Achieved Active Warps Per SM           warp        46.29
     ------------------------------- ----------- ------------
 
     Section: GPU and Memory Workload Distribution
     -------------------------- ----------- ------------
     Metric Name                Metric Unit Metric Value
     -------------------------- ----------- ------------
-    Average DRAM Active Cycles       cycle       131156
-    Total DRAM Elapsed Cycles        cycle    183373824
-    Average L1 Active Cycles         cycle   2344583.95
-    Total L1 Elapsed Cycles          cycle    142236910
-    Average L2 Active Cycles         cycle   2253647.29
-    Total L2 Elapsed Cycles          cycle     54137424
-    Average SM Active Cycles         cycle   2344583.95
-    Total SM Elapsed Cycles          cycle    142236910
-    Average SMSP Active Cycles       cycle   2343869.65
-    Total SMSP Elapsed Cycles        cycle    568947640
+    Average DRAM Active Cycles       cycle       131132
+    Total DRAM Elapsed Cycles        cycle    135842816
+    Average L1 Active Cycles         cycle   1750615.12
+    Total L1 Elapsed Cycles          cycle    105962480
+    Average L2 Active Cycles         cycle   1672315.29
+    Total L2 Elapsed Cycles          cycle     40105416
+    Average SM Active Cycles         cycle   1750615.12
+    Total SM Elapsed Cycles          cycle    105962480
+    Average SMSP Active Cycles       cycle   1750657.50
+    Total SMSP Elapsed Cycles        cycle    423849920
     -------------------------- ----------- ------------
 
 
-`ncu --kernel-name matmul_naive --metrics sm__warps_active.avg.pct_of_peak_sustained_active,l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio,smsp__thread_inst_executed_per_inst_executed.ratio ./gemm_naive`
+`ncu --kernel-name matmul_tiled --metrics sm__warps_active.avg.pct_of_peak_sustained_active,l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio,smsp__thread_inst_executed_per_inst_executed.ratio ./gemm_tiled`
 
-  matmul_naive(float *, float *, float *, int, int, int) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 12.0
+ matmul_tiled(float *, float *, float *, int, int, int) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 12.0
     Section: Command line profiler metrics
     -------------------------------------------------------------------- ----------- ------------
     Metric Name                                                          Metric Unit Metric Value
     -------------------------------------------------------------------- ----------- ------------
-    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio      sector            2
-    sm__warps_active.avg.pct_of_peak_sustained_active                              %        96.38
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio      sector            4
+    sm__warps_active.avg.pct_of_peak_sustained_active                              %        96.48
     smsp__thread_inst_executed_per_inst_executed.ratio                                         32
     -------------------------------------------------------------------- ----------- ------------

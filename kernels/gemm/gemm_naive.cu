@@ -63,13 +63,13 @@ int main() {
 
     // 2. Device 端：cudaMalloc / memcpy
     float *d_A, *d_B, *d_C;
-    cudaMalloc(((void**)&d_A), bytes);
-    cudaMalloc(((void**)&d_B), bytes);
-    cudaMalloc(((void**)&d_C), bytes);
+    cudaMalloc((void**)&d_A, bytes);
+    cudaMalloc((void**)&d_B, bytes);
+    cudaMalloc((void**)&d_C, bytes);
 
     cudaMemcpy(d_A, h_A, bytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, h_B, bytes, cudaMemcpyHostToDevice);
-
+    cudaMemcpy(d_C, h_C_gpu, bytes, cudaMemcpyHostToDevice);
     // 3. [x] launch: 16x16 block，grid 覆盖整个 NxN 输出
     dim3 block(16, 16);
     dim3 grid((N + 15) / 16, (N + 15) / 16); // 向上取整的工业级写法
