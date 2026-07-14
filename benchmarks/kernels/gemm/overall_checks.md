@@ -59,6 +59,8 @@ Compute (SM) Throughput  95.18%
 Memory Throughput        95.18%
 Achieved Occupancy       96.44%
 divergence               100%
+bank conflict:           0.007% (4741/67,000,000)
+32768 warps * 2048 (每个Warp跑64个tile,16个k*2次shared load)
 
 ---
 
@@ -67,7 +69,11 @@ divergence               100%
 ---
 
 ## Stage 2 – Optimized(register blocking / coarsening):写完 Stage 1 用数据驱动再上
-
+**purpose**
+1. register/thread tiling：每个线程算一个Micro-tile，一次shared load喂多次FMA -> 算数强度飙升 -> 访存管线不再是瓶颈。
+2. double buffering/预取： 一边算当前tile，一边把下一个tile从global载进来，把访存延迟藏在计算后面；
+3. 向量化访存(float4):一条指令搬128位，减少访存指令数
+4. warp tiling、padding消除bank冲突(已经很低了)
 ```bash
 ncu --metrics achieved_occupancy,\
     litex__t_sectors_pipe_lsu_mem_global_op_ld.avg.pct_of_peak_sustained_active,\

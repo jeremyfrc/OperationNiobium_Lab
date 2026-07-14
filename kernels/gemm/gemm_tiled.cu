@@ -35,7 +35,9 @@ __global__ void matmul_tiled(float* A, float* B, float* C, int N, int K, int M) 
         }
         __syncthreads();
     }
-    C[row * N + col]= sum;
+    if (row < M && col < N) {
+        C[row * N + col]= sum;
+    }
 }
 
 
@@ -74,7 +76,7 @@ int main() {
     dim3 grid((N + TILE_DIM - 1) / TILE_DIM, (M + TILE_DIM - 1) / TILE_DIM);
 
     // 启动 Kernel 并同步
-    matmul_tiled<<<grid, block>>>(d_A, d_B, d_C, M, K, N);
+    matmul_tiled<<<grid, block>>>(d_A, d_B, d_C, N, K, M);
     cudaDeviceSynchronize();
 
     // 拷回结果

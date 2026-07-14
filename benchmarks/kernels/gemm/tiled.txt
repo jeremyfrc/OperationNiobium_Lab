@@ -83,14 +83,15 @@ Verification SUCCESS! GPU results match CPU baseline.
     -------------------------- ----------- ------------
 
 
-`ncu --kernel-name matmul_tiled --metrics sm__warps_active.avg.pct_of_peak_sustained_active,l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio,smsp__thread_inst_executed_per_inst_executed.ratio ./gemm_tiled`
+`ncu --kernel-name matmul_tiled --metrics sm__warps_active.avg.pct_of_peak_sustained_active,l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio,smsp__thread_inst_executed_per_inst_executed.ratio,l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum ./build/gemm_tiled`
 
- matmul_tiled(float *, float *, float *, int, int, int) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 12.0
+matmul_tiled(float *, float *, float *, int, int, int) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 12.0
     Section: Command line profiler metrics
     -------------------------------------------------------------------- ----------- ------------
     Metric Name                                                          Metric Unit Metric Value
     -------------------------------------------------------------------- ----------- ------------
-    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio      sector            4
-    sm__warps_active.avg.pct_of_peak_sustained_active                              %        96.48
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio      sector         4.00
+    l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum                                 4741
+    sm__warps_active.avg.pct_of_peak_sustained_active                              %        96.49
     smsp__thread_inst_executed_per_inst_executed.ratio                                         32
     -------------------------------------------------------------------- ----------- ------------
