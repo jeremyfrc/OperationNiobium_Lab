@@ -78,7 +78,7 @@ __global__ void gemm_tiled(float* A, float* B, float* C, int N) {
 
 ---
 
-## Stage 2 – Optimized(register blocking / coarsening):写完 Stage 1 用数据驱动再上。
+## Stage 2 – Optimized(register blocking / coarsening):写完 Stage 1 用数据驱动再上。(stretch goal， will check when get time)
 
 `ncu`实测命令bash：
 
