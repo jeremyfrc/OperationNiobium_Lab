@@ -124,13 +124,13 @@ struct TransformerConfig {
     int d_model;
     int n_layers;
     int n_heads;
-    int n_kv_heads; // GQA: n_kv_heads out: [seq_len, d_model]
-// 内部:Q/K/V 投影 -> RoPE(Q,K)-> GQA 分组重复 K/V -> causal mask ->
-// softmax(QK^T / sqrt(d_head)) -> @V -> Wo 投影
-void attention_forward(const Tensor& x,
-                       const AttentionWeights& w,
-                       const TransformerConfig& cfg,
-                       Tensor& out);
+    int n_kv_heads; // GQA: n_kv_heads <= n_heads, n_heads % n_kv_heads == 0
+	int d_head;      //  d_model/n_heads
+	int d_ff;        // SwiGLU 隐藏维
+	int max_seq_len;
+	float rope_theta;
+	float rms_eps;
+};
 ```
 
 ### 4.3 `include/ops.h`

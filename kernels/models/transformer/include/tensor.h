@@ -4,9 +4,9 @@
 
 class Tensor{
     public:
-        explicit Tenors(std::vector<int> shape);
+        explicit Tensor(std::vector<int> shape);
         
-        float& at(std::initialier_list<int> idx);
+        float& at(std::initializer_list<int> idx);
         const float& at(std::initializer_list<int> idx) const;
 
         float* data();
@@ -18,4 +18,5 @@ class Tensor{
     private:
         std::vector<int> shape_;
         std::vector<float> data_;
+        std::vector<int> strides_;
 };
