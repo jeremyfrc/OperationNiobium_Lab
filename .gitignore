@@ -84,3 +84,4 @@ mandelbrot
 objs/
 logs/
 .ruff_cache/
+**/ref/data/

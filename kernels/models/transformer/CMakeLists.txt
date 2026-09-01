@@ -24,17 +24,17 @@ target_include_directories(transformer_forward PUBLIC include)
 # ==============================================================================
 
 # Stage 1 单测
-# add_executable(test_rmsnorm tests/test_rmsnorm.cpp)
-# target_link_libraries(test_rmsnorm PRIVATE transformer_forward)
+add_executable(test_rmsnorm tests/test_rmsnorm.cpp)
+target_link_libraries(test_rmsnorm PRIVATE transformer_forward)
 
-# add_executable(test_rope tests/test_rope.cpp)
-# target_link_libraries(test_rope PRIVATE transformer_forward)
+add_executable(test_rope tests/test_rope.cpp)
+target_link_libraries(test_rope PRIVATE transformer_forward)
 
 add_executable(test_softmax tests/test_softmax.cpp)
 target_link_libraries(test_softmax PRIVATE transformer_forward)
 
-# add_executable(test_swiglu tests/test_swiglu.cpp)
-# target_link_libraries(test_swiglu PRIVATE transformer_forward)
+add_executable(test_swiglu tests/test_swiglu.cpp)
+target_link_libraries(test_swiglu PRIVATE transformer_forward)
 
 # Stage 2 单测
 # add_executable(test_attention_block tests/test_attention_block.cpp)
