@@ -58,38 +58,57 @@ def rope_ref(x: np.ndarray, theta: float=10000.0) -> np.ndarray:
     assert D % 2 == 0, "head_dim must be even!"
 
     half_D = D // 2
-    # 1. 计算positions: [0, 1, ..., S-1] -> shape(S, 1)
-    pos = np.arange(S, dtype=np.float32)[:, np.newaxis]
-
-    # 2. 计算frequencies: 1.0 / (theta ** (2i/D)) -> shape(D/2,)
+    pos = np.arange(S, dtype=np.float32)[:, np.newaxis] # (S, 1)
+    
+    # 频率: shape (D/2,)
     i = np.arange(half_D, dtype=np.float32)
     freqs = 1.0 / (theta ** (2.0 * i / D))
 
-    # 3. 外积计算角度angles: shape(S, D/2)
-    angles = pos * freqs
+    # angles: shape (S, D/2)
+    angles = pos * freqs 
 
-    # 4. 广播cos/sin 形状至(1, S, 1, D/2)
+    # cos/sin: shape (1, S, 1, D/2)
     cos = np.cos(angles)[np.newaxis, :, np.newaxis, :]
     sin = np.sin(angles)[np.newaxis, :, np.newaxis, :]
 
-    # 5. 拆分x的前半部分和后半部分
-    x1 = x[..., :half_D]
-    x2 = x[..., half_D:]
+    # 适配 C++ 的交错式 (interleaved) 旋转:
+    # x 对应形状 [B, S, H, D]，我们将最后一维拆成 [..., half_D, 2]
+    x_reshaped = x.reshape(B, S, H, half_D, 2)
+    x0 = x_reshaped[..., 0] # 前半交错项
+    x1 = x_reshaped[..., 1] # 后半交错项
 
-    # 6. 旋转公式： [x1, x2] * cos + [-x2, x1] * sin
-    out1 = x1 * cos - x2 * sin
-    out2 = x1 * sin + x2 * cos
-    return np.concatenate([out1, out2], axis=-1).astype(np.float32)
+    # 扩展 cos/sin 形状以匹配广播 [B, S, H, half_D]
+    cos = np.broadcast_to(cos, (B, S, H, half_D))
+    sin = np.broadcast_to(sin, (B, S, H, half_D))
+
+    out0 = x0 * cos - x1 * sin
+    out1 = x0 * sin + x1 * cos
+
+    # 重新拼回 [B, S, H, D]
+    out = np.stack([out0, out1], axis=-1)
+    return out.reshape(B, S, H, D).astype(np.float32)
 
 
-def swiglu_ref(gate: np.ndarray, up: np.ndarray):
+def ffn_swiglu_ref(x: np.ndarray, w_gate: np.ndarray, w_up: np.ndarray, w_down: np.ndarray) -> np.ndarray:
+    """
+    x:       shape (batch, seq_len, in_dim)
+    w_gate:  shape (in_dim, hidden_dim)       # 直接存 (in_dim, intermediate_dim)
+    w_up:    shape (in_dim, hidden_dim)       # 直接存 (in_dim, intermediate_dim)
+    w_down:  shape (hidden_dim, in_dim)       # 直接存 (intermediate_dim, in_dim)
+    """
+    gate = np.matmul(x, w_gate)  # 不再转置
+    up   = np.matmul(x, w_up)    # 不再转置
+    
     silu_gate = gate * (1.0 / (1.0 + np.exp(-gate)))
-    return (silu_gate * up).astype(np.float32)
+    hidden = silu_gate * up
+    
+    out = np.matmul(hidden, w_down) # 不再转置
+    return out.astype(np.float32)
 
 # ==========================================
 # 1. Softmax Reference Data
 # ==========================================
-x_sm = rand(4, 16) * 10.0
+x_sm = rand(2, 4, 8, 8)
 out_sm = softmax_ref(x_sm)
 
 save_bin("softmax_input.bin", x_sm)
@@ -119,13 +138,28 @@ save_bin("rope_out.bin", out_rope)
 # ==========================================
 # 4. SwiGLU FFN Reference Data
 # ==========================================
-gate_in = rand(2, 8, 32)
-up_in = rand(2, 8, 32)
-out_swiglu = swiglu_ref(gate_in, up_in)
+batch, seq_len = 2, 4
+in_dim = 64        # hidden_dim
+hidden_dim = 128   # intermediate_dim / ffn_dim
+num_tokens = batch * seq_len
 
-save_bin("swiglu_gate_in.bin", gate_in)
-save_bin("swiglu_up_in.bin", up_in)
-save_bin("swiglu_out.bin", out_swiglu)
+# 2. 随机生成符合 B 方案 Shapes 的输入与权重
+# 输入 x: (batch, seq_len, in_dim)
+x = np.random.randn(batch, seq_len, in_dim).astype(np.float32)
+    
+# B 方案：权重形状直接存为 C++ matmul 期望的 [in, out]
+w_gate = np.random.randn(in_dim, hidden_dim).astype(np.float32)
+w_up   = np.random.randn(in_dim, hidden_dim).astype(np.float32)
+w_down = np.random.randn(hidden_dim, in_dim).astype(np.float32)
 
+# 3. 使用前向计算得到 reference output
+out = ffn_swiglu_ref(x, w_gate, w_up, w_down)
+
+# 4. 直接保存二进制文件 (无需任何 .T 转置)
+save_bin("swiglu_x.bin", x)
+save_bin("swiglu_w_gate.bin", w_gate)
+save_bin("swiglu_w_up.bin", w_up)
+save_bin("swiglu_w_down.bin", w_down)
+save_bin("swiglu_out.bin", out)
 
 print("\n🎉 Stage 1 所有的 Reference 数据已经全部成功导出至 tests/ref/data/ 目录！")

@@ -1,4 +1,5 @@
 #include <cassert>
+#include <stdexcept>
 #include <cmath>
 #include <algorithm>
 #include "tensor.h"
@@ -16,38 +17,38 @@ void add_inplace(Tensor& A, const Tensor& B){
     }
 }
 
-void softmax_inplace(Tensor& x){
-    const std::vector<int>& shape = x.shape();
-    assert(!shape.empty() && "Tensor shape cannot be empty!");
-    int N = shape.back();
 
-    int totalElements = x.numel();
-    int numRows = totalElements / N;
+void softmax_inplace(Tensor& x) {
+    const std::vector<int>& shape = x.shape();
+    int N = shape.back(); // 最后一维大小 (比如 8)
+
+    size_t totalElements = x.numel();
+    size_t numRows = totalElements / N; // 行数 (比如 2*4 = 8)
 
     float* dataPtr = x.data();
 
-    for (int r = 0; r < numRows; ++r){
-        float* row = dataPtr + r * N;
+    for (size_t r = 0; r < numRows; ++r) {
+        float* row = dataPtr + r * N; // 确认这里是 + r * N
 
+        // 1. 找 row 内的最大值
         float maxVal = row[0];
-        for (int j = 1; j < N; ++j){
-            if (row[j] > maxVal) {
-                maxVal = row[j];
-            }
+        for (int j = 1; j < N; ++j) {
+            if (row[j] > maxVal) maxVal = row[j];
         }
 
+        // 2. 求 exp 和 sum
         float sumExp = 0.0f;
         for (int j = 0; j < N; ++j) {
             row[j] = std::exp(row[j] - maxVal);
             sumExp += row[j];
         }
 
-        float invSum = 1.0 / sumExp;
-        for (int j = 0; j < N; ++j){
+        // 3. 归一化
+        float invSum = 1.0f / sumExp;
+        for (int j = 0; j < N; ++j) {
             row[j] *= invSum;
         }
     }
-
 }
 
 

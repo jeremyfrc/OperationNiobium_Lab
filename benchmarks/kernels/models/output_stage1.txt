@@ -1,0 +1,47 @@
+./build/test_rope 
+========================================
+        Running RoPE Unit Test          
+========================================
+[Test] Running In-place RoPE Op Test... PASSED! ✅
+
+All test cases passed successfully! 🚀
+✅ [PASS] RoPE test passed!
+
+All python ref RoPE test cases passed successfully! 🚀
+
+
+./build/test_rmsnorm 
+========================================
+       Running RMSNorm Unit Test        
+========================================
+[Test] Running RMSNorm Op Test... PASSED! ✅
+
+All local test cases passed successfully! 🚀
+✅ [PASS] RMSNorm test passed!
+
+All python ref RMSNorm test cases passed successfully! 🚀
+
+
+./build/test_rmsnorm 
+========================================
+       Running RMSNorm Unit Test        
+========================================
+[Test] Running RMSNorm Op Test... PASSED! ✅
+
+All local test cases passed successfully! 🚀
+✅ [PASS] RMSNorm test passed!
+
+All python ref RMSNorm test cases passed successfully! 🚀
+
+
+./build/test_softmax 
+========================================
+   Running Transformer C++ Unit Tests   
+========================================
+[Test] Running Softmax Op Test... PASSED! ✅
+[Test] Running Matmul Op Test... PASSED! ✅
+
+All active unit tests passed successfully! 🚀
+Loaded x_data size: 512
+Loaded ref_out size: 512
+✅ [PASS] Softmax test passed!

@@ -3,12 +3,13 @@
 #include <cassert>
 #include "tensor.h"
 #include "swiglu.h"
+#include "test_utils.h" // 引用测试工具头文件
 
 static bool approx_equal(float a, float b, float epsilon = 1e-3f) {
     return std::fabs(a - b) < epsilon;
 }
 
-void test_swiglu_op() {
+void test_swiglu_op_local() {
     std::cout << "[Test] Running SwiGLU Forward FFN Test... " << std::flush;
 
     // 参数设定: seq_len=1, hidden_dim=2, intermediate_dim=2
@@ -61,14 +62,64 @@ void test_swiglu_op() {
     std::cout << "PASSED! ✅\n";
 }
 
+int test_swiglu_ref() {
+    try {
+        std::string base = "tests/ref/data/";
+
+        // 1. 文件名修正：与 dump_reference.py 中的 save_bin("swiglu_x.bin", ...) 保持一致
+        auto x_data = loadBinFile(base + "swiglu_x.bin");
+        auto w_gate_data = loadBinFile(base + "swiglu_w_gate.bin");
+        auto w_up_data = loadBinFile(base + "swiglu_w_up.bin");
+        auto w_down_data = loadBinFile(base + "swiglu_w_down.bin");
+        auto ref_out = loadBinFile(base + "swiglu_out.bin");
+
+        // 2. 根据 tiny_cfg 匹配 Shape
+        // (如果 Python 端使用的是 hidden_dim=64, ffn_dim=128, batch=2, seq_len=4):
+        int batch = 2, seq_len = 4;
+        int in_dim = 64, ffn_dim = 128;
+        int num_tokens = batch * seq_len; // 8
+
+        // 如果你的 matmul 只支持 2D 输入，将 input 构造为 [num_tokens, in_dim]
+        Tensor input({num_tokens, in_dim}, x_data);
+        Tensor w_gate({in_dim, ffn_dim}, w_gate_data);
+        Tensor w_up({in_dim, ffn_dim}, w_up_data);
+        Tensor w_down({ffn_dim, in_dim}, w_down_data);
+        
+        Tensor output({num_tokens, in_dim});
+        FFNWeights weights(w_gate, w_up, w_down);
+
+        // 3. 执行前向
+        swiglu_forward(input, weights, output);
+
+        // 4. 误差断言校验
+        bool ok = check_close(output.data(), ref_out.data(), ref_out.size(), 1e-4f, 1e-5f);
+        if (ok) {
+            std::cout << "✅ [PASS] SwiGLU test passed!" << std::endl;
+            return 0;
+        } else {
+            std::cout << "❌ [FAIL] SwiGLU test failed!" << std::endl;
+            return 1;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+}
+
 
 int main() {
     std::cout << "========================================\n";
     std::cout << "       Running SwiGLU Unit Test         \n";
     std::cout << "========================================\n";
 
-    test_swiglu_op();
+    test_swiglu_op_local();
+    std::cout << "\nAll local test cases passed successfully! 🚀\n";
 
-    std::cout << "\nAll test cases passed successfully! 🚀\n";
+    int s = test_swiglu_ref();
+    if (s != 0) {
+        std::cerr << "SwiGLU reference test failed!" << std::endl;
+        return s; // 返回错误码
+    }
+    std::cout << "\nAll python ref SwiGLU test cases passed successfully! 🚀\n";
     return 0;
 }

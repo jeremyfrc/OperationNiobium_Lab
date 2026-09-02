@@ -74,7 +74,7 @@ int main() {
         std::cerr << "RMSNorm reference test failed!" << std::endl;
         return s; // 返回错误码
     }
-    std::cout << "\nAll python ref test cases passed successfully! 🚀\n";
+    std::cout << "\nAll python ref RMSNorm test cases passed successfully! 🚀\n";
 
     return 0;
 }

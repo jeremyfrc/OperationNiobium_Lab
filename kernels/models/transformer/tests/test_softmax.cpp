@@ -3,6 +3,7 @@
 #include <cassert>
 #include "tensor.h"
 #include "ops.h"
+#include "test_utils.h" // 引用测试工具头文件
 
 static bool approx_equal(float a, float b, float epsilon = 1e-4f){
     return std::fabs(a - b) < epsilon;
@@ -58,6 +59,36 @@ void test_matmul_op(){
     std::cout << "PASSED! ✅\n";
 }
 
+
+int test_softmax_ref() {
+    try {
+        const std::string base = "tests/ref/data/";
+        auto x_data = loadBinFile(base + "softmax_input.bin");
+        auto ref_out = loadBinFile(base + "softmax_out.bin");
+
+        // ⚠️ 确保元素总数 matching: 2 * 4 * 8 = 64
+        std::cout << "Loaded x_data size: " << x_data.size() << std::endl;
+        std::cout << "Loaded ref_out size: " << ref_out.size() << std::endl;
+
+        Tensor x({2, 4, 8, 8}, x_data);
+
+        softmax_inplace(x);
+
+        bool ok = check_close(x.data(), ref_out.data(), ref_out.size(), 1e-4f, 1e-5f);
+        if (ok) {
+            std::cout << "✅ [PASS] Softmax test passed!" << std::endl;
+            return 0;
+        } else {
+            std::cout << "❌ [FAIL] Softmax test failed!" << std::endl;
+            return 1;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+}
+
+
 int main(){
     std::cout << "========================================\n";
     std::cout << "   Running Transformer C++ Unit Tests   \n";
@@ -67,5 +98,12 @@ int main(){
     test_matmul_op();
 
     std::cout << "\nAll active unit tests passed successfully! 🚀\n";
+
+    int s = test_softmax_ref();
+    if (s != 0) {
+        std::cerr << "Softmax reference test failed!" << std::endl;
+        return s; // 返回错误码
+    }
+    std::cout << "\nAll python ref Softmax test cases passed successfully! 🚀";
     return 0;
 }
