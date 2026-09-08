@@ -1,0 +1,26 @@
+========================================
+       Running Attention Block Test     
+========================================
+✅ [PASS] Attention block test passed!
+
+added reshape in tensor to make sure rope work:
+rope_inplace是怎么知道head_dim? 靠猜。
+```cpp
+int headDim = shape.back();
+int seqIdx = (r/numHeads);
+```
+所以它有个隐含契约,传进来的tensor，最后一位必须就是head_dim
+
+而在test的时候，实际传了
+{seq_len, n_heads*d_Head}，于是head_dim变成了64，两个错误同时发生。
+只有第0行可以，因为0 x freq = 0 --> cos1, sin0
+
+所以改动了三处：
+tensor里面加reshape, 连续内存，只重算strides，不拷数据
+```
+q_linear.reshape({seq_len * n_heads, d_head});
+```
+最后一维变回16，这里headDim正确，rope完，再给他转回来：
+```
+q_linear.reshape({seq_len, n_heads * d_head});
+```

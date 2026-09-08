@@ -1,6 +1,6 @@
 import numpy as np
 from pathlib import Path
-D = Path("tests/ref/data")
+D = Path("data")
 
 def ld(n, s): return np.fromfile(D/n, np.float32).reshape(s)
 
@@ -53,7 +53,7 @@ print("diff q_my vs q_cpp max:", np.abs(q_my - q_cpp.reshape(SL, ha*dha)).max())
 
 import numpy as np
 from pathlib import Path
-D=Path("tests/ref/data")
+D=Path("data")
 def ld(n,s): return np.fromfile(D/n,np.float32).reshape(s)
 x=ld("attn_input.bin",(8,64)); wK=ld("attn_wK.bin",(64,32))
 SL,DM=8,64; nkv,dh=2,16; theta=10000.0

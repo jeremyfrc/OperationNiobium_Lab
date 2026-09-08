@@ -1,7 +1,7 @@
 import numpy as np
 from pathlib import Path
 
-D = Path("tests/ref/data")
+D = Path("data")
 
 def ld(n, s):
     return np.fromfile(D / n, dtype=np.float32).reshape(s).astype(np.float64)
