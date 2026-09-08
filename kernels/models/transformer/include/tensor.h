@@ -5,8 +5,9 @@
 class Tensor{
     public:
         explicit Tensor(std::vector<int> shape);
-        Tensor(std::vector<int> shape, std::vector<float> data): shape_(std::move(shape)), data_(std::move(data)) {}
-        
+
+        Tensor(std::vector<int> shape, const std::vector<float>& data);
+
         float& at(std::initializer_list<int> idx);
         const float& at(std::initializer_list<int> idx) const;
 

@@ -1,6 +1,7 @@
 #include "tensor.h"
 #include <numeric>
 #include <stdexcept>
+#include <cassert>
 
 Tensor::Tensor(std::vector<int> shape) : shape_(std::move(shape)) {
     int rank = shape_.size();
@@ -19,6 +20,20 @@ Tensor::Tensor(std::vector<int> shape) : shape_(std::move(shape)) {
     }
 
     data_.resize(total_elements, 0.0f);
+}
+
+Tensor::Tensor(std::vector<int> shape, const std::vector<float>& data) : shape_(std::move(shape)) {
+    // 1. 初始化 stride
+    int rank = shape_.size();
+    strides_.resize(rank);
+    int current_stride = 1;
+    for (int i = rank - 1; i >= 0; --i) {
+        strides_[i] = current_stride;
+        current_stride *= shape_[i];
+    }
+    // 2. 拷贝数据
+    data_ = data;
+    assert(data_.size() == (size_t)current_stride && "Data size does not match shape!");
 }
 
 size_t Tensor::numel() const {

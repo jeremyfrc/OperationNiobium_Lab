@@ -163,3 +163,84 @@ save_bin("swiglu_w_down.bin", w_down)
 save_bin("swiglu_out.bin", out)
 
 print("\n🎉 Stage 1 所有的 Reference 数据已经全部成功导出至 tests/ref/data/ 目录！")
+
+
+# ==========================================
+# 5. Attention Block Reference Data
+# ==========================================
+def softmax_last(z):
+    m = z.max(axis=-1, keepdims=True)
+    e = np.exp(z - m)
+    return e / e.sum(axis=-1, keepdims=True)
+
+def rope_interleaved(x3d, theta):
+    """x3d: [seq_len, n_heads, head_dim]
+    对每个 (s, h) 的行, 按 interleaved (2i,2i+1) 旋转, 频率指数 i """
+    S, H, D = x3d.shape
+    DH = D // 2
+    i = np.arange(DH)                      # 0..DH-1
+    freqs = 1.0 / (theta ** (2.0 * i / D)) # shape (DH,)
+    ang = np.arange(S)[:, None] * freqs[None, :]  # (S,DH)
+    cos = np.cos(ang)
+    sin = np.sin(ang)
+    # x3d -> 拆 pair: last dim reshape (S,H,DH,2)
+    xr = x3d.reshape(S, H, DH, 2)
+    x0 = xr[..., 0]
+    x1 = xr[..., 1]
+    # cos/sin broadcast to (S,H,DH)
+    cos = np.broadcast_to(cos[:, None, :], (S, H, DH))
+    sin = np.broadcast_to(sin[:, None, :], (S, H, DH))
+    out0 = x0 * cos - x1 * sin
+    out1 = x0 * sin + x1 * cos
+    out = np.stack([out0, out1], axis=-1).reshape(S, H, D)
+    return out
+
+def attention_ref(x, wQ, wK, wV, wO, cfg, theta=10000.0):
+    seq_len = x.shape[0]
+    n_heads  = cfg['num_heads']
+    n_kv     = cfg['num_kv_heads']
+    head_dim = cfg['head_dim']
+    group    = n_heads // n_kv
+
+    # 投影并 reshape 成 [seq_len, n_head, head_dim]
+    q = (x @ wQ).reshape(seq_len, n_heads, head_dim)
+    k = (x @ wK).reshape(seq_len, n_kv,   head_dim)
+    # APPLY RoPE (interleaved) —— 关键新增
+    q = rope_interleaved(q, theta)
+    k = rope_interleaved(k, theta)
+
+    v = (x @ wV).reshape(seq_len, n_kv, head_dim)
+
+    # 转成 [n_head, seq_len, head_dim]
+    q = q.transpose(1, 0, 2)
+    k = k.transpose(1, 0, 2)
+    v = v.transpose(1, 0, 2)
+
+    # GQA repeat KV
+    k = np.repeat(k, group, axis=0)
+    v = np.repeat(v, group, axis=0)
+
+    attn_weights = (q @ k.transpose(0, 2, 1)) / np.sqrt(head_dim)
+    mask = np.tril(np.ones((seq_len, seq_len)))
+    attn_weights = np.where(mask == 1, attn_weights, -1e9)
+    attn_probs = softmax_last(attn_weights)
+
+    context = attn_probs @ v                       # [n_head, seq_len, head_dim]
+    context = context.transpose(1, 0, 2).reshape(seq_len, n_heads * head_dim)
+    return context @ wO
+
+# 这里的形状要和你 C++ 定义的 tiny_cfg 一致
+x_attn = rand(8, 64)
+wQ = rand(64, 64) # n_heads(4) * d_head(16) = 64
+wK = rand(64, 32) # n_kv_heads(2) * d_head(16) = 32
+wV = rand(64, 32)
+wO = rand(64, 64)
+
+out_attn = attention_ref(x_attn, wQ, wK, wV, wO, tiny_cfg)
+
+save_bin("attn_input.bin", x_attn)
+save_bin("attn_wQ.bin", wQ)
+save_bin("attn_wK.bin", wK)
+save_bin("attn_wV.bin", wV)
+save_bin("attn_wO.bin", wO)
+save_bin("attn_out.bin", out_attn)

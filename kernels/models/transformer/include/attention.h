@@ -3,10 +3,10 @@
 #include "config.h"
 
 struct AttentionWeights{
-    Tensor wq; //[d_model, n_heads * d_head]
-    Tensor Wk; //[d_model, n_kv_heads * d_head]
-    Tensor Wv;  //[d_model, n_kv_heads * d_head]
-    Tensor Wo;  //[n_heads * d_head, d_model]
+    Tensor wQ; //[d_model, n_heads * d_head]
+    Tensor wK; //[d_model, n_kv_heads * d_head]
+    Tensor wV;  //[d_model, n_kv_heads * d_head]
+    Tensor wO;  //[n_heads * d_head, d_model]
 };
 
 // x: [seq_len, d_model] -> out: [seq_len, d_model]
