@@ -28,9 +28,16 @@ void attention_forward(const Tensor& x, const AttentionWeights& w, const Transfo
     matmul(x, w.wV, v_linear);
 
     // 2. 施加 RoPE (旋转位置编码)
-    // rope_inplace 内部会根据 head_dim 处理维度
+    // rope_inplace的契约：输入最后一维必须是head_dim
+    // 投影输出是[seq_len, heads*d_head]，最后一维是heads*d_head
+    // 直接传会让rope把整行当成是一个head_dim = heads*d_head的头来转
+    // 位置/频率全错，先reshape成[seq*heads, d_head]，rope后再还原。
+    q_linear.reshape({seq_len * n_heads, d_head});
+    k_linear.reshape({seq_len * n_kv_heads, d_head});
     rope_inplace(q_linear, n_heads, 0, cfg.rope_theta);
     rope_inplace(k_linear, n_kv_heads, 0, cfg.rope_theta);
+    q_linear.reshape({seq_len, n_heads * d_head});
+    k_linear.reshape({seq_len, n_kv_heads * d_head});
 
     // 3. 计算 Attention Score 并应用 Causal Mask
     // scores 维度: [n_heads, seq_len, seq_len]

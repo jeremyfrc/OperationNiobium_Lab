@@ -40,6 +40,20 @@ size_t Tensor::numel() const {
     return data_.size();
 }
 
+void Tensor::reshape(std::vector<int> new_shape){
+    int rank = new_shape.size();
+    std::vector<int> new_strides(rank);
+    int current_stride = 1;
+    for (int i = rank-1; i >=0; --i) {
+        new_strides[i] = current_stride;
+        current_stride *= new_shape[i];
+    }
+    assert(data_.size() == (size_t)current_stride && "reshape must preserve numel!");
+
+    shape_ = std::move(new_shape);
+    strides_ = std::move(new_strides);
+}
+
 float* Tensor::data() {
     return data_.data();
 }

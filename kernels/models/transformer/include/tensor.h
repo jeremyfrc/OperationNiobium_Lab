@@ -16,6 +16,9 @@ class Tensor{
 
         const std::vector<int>& shape() const;
         size_t numel() const;
+
+        //原地改变逻辑形状；数据连续，仅重算strides_
+        void reshape(std::vector<int> new_shape);
     
     private:
         std::vector<int> shape_;
