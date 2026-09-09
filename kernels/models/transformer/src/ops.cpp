@@ -1,5 +1,4 @@
-#include <cassert>
-#include <stdexcept>
+#include "check.h"
 #include <cmath>
 #include <algorithm>
 #include "tensor.h"
@@ -7,7 +6,7 @@
 
 
 void add_inplace(Tensor& A, const Tensor& B){
-    assert(A.numel() == B.numel() && "Tensor sizes must match for add_inplace!");
+    NB_CHECK(A.numel() == B.numel(), "ops::add_inplace: Tensor sizes must match!");
     float* a_ptr = A.data();
     const float* b_ptr = B.data();
 
@@ -57,8 +56,8 @@ void matmul(const Tensor& A, const Tensor& B, Tensor& C){
     int K = A.shape()[1];
     int N = B.shape()[1];
 
-    assert(A.shape()[1] == B.shape()[0] && "A's cols must be same as B's rows!");
-    assert(C.shape()[0] == M && C.shape()[1] == N && "C shape mismatch!");
+    NB_CHECK(A.shape()[1] == B.shape()[0], "matmul: A cols must be same as B rows");
+    NB_CHECK(C.shape()[0] == M && C.shape()[1] == N, "matmul: C shape mismatch.");
 
     const float* a_ptr = A.data();
     const float* b_ptr = B.data();

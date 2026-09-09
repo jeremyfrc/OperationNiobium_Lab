@@ -1,7 +1,49 @@
+$ ./build/test_attention_block 
 ========================================
        Running Attention Block Test     
 ========================================
 ✅ [PASS] Attention block test passed!
+$ ./build/test_rope
+========================================
+        Running RoPE Unit Test          
+========================================
+[Test] Running In-place RoPE Op Test... PASSED! ✅
+
+All test cases passed successfully! 🚀
+✅ [PASS] RoPE test passed!
+
+All python ref RoPE test cases passed successfully! 🚀
+$ ./build/test_rmsnorm 
+========================================
+       Running RMSNorm Unit Test        
+========================================
+[Test] Running RMSNorm Op Test... PASSED! ✅
+
+All local test cases passed successfully! 🚀
+✅ [PASS] RMSNorm test passed!
+
+All python ref RMSNorm test cases passed successfully! 🚀
+$ ./build/test_swiglu 
+========================================
+       Running SwiGLU Unit Test         
+========================================
+[Test] Running SwiGLU Forward FFN Test... PASSED! ✅
+
+All local test cases passed successfully! 🚀
+✅ [PASS] SwiGLU test passed!
+
+All python ref SwiGLU test cases passed successfully! 🚀
+$ ./build/test_softmax 
+========================================
+   Running Transformer C++ Unit Tests   
+========================================
+[Test] Running Softmax Op Test... PASSED! ✅
+[Test] Running Matmul Op Test... PASSED! ✅
+
+All active unit tests passed successfully! 🚀
+Loaded x_data size: 512
+Loaded ref_out size: 512
+✅ [PASS] Softmax test passed!
 
 added reshape in tensor to make sure rope work:
 rope_inplace是怎么知道head_dim? 靠猜。

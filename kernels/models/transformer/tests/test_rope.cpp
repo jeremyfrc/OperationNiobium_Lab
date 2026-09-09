@@ -17,7 +17,7 @@ void test_rope_inplace_op() {
     x_pos0.at({0, 0, 0}) = 1.0f;
     x_pos0.at({0, 0, 1}) = 2.0f;
 
-    rope_inplace(x_pos0, 1, /*pos_offset=*/0);
+    rope_inplace(x_pos0, 1, /*head_dim=*/2, /*pos_offset=*/0);
 
     assert(approx_equal(x_pos0.at({0, 0, 0}), 1.0f));
     assert(approx_equal(x_pos0.at({0, 0, 1}), 2.0f));
@@ -28,7 +28,7 @@ void test_rope_inplace_op() {
     x_pos1.at({0, 0, 0}) = 1.0f;
     x_pos1.at({0, 0, 1}) = 0.0f;
 
-    rope_inplace(x_pos1, 1, /*pos_offset=*/1);
+    rope_inplace(x_pos1, 1, /*head_dim=*/2, /*pos_offset=*/1);
 
     assert(approx_equal(x_pos1.at({0, 0, 0}), std::cos(1.0f)));
     assert(approx_equal(x_pos1.at({0, 0, 1}), std::sin(1.0f)));
@@ -47,8 +47,8 @@ int test_rope_ref() {
         Tensor q({1, 8, 2, 16}, q_data);
         Tensor actual_out({1, 8, 2, 16});
 
-        // 调用 rope: numHeads = 2, posOffset = 0, base = 10000.0f
-        rope(q, actual_out, 2, 0, 10000.0f);
+        // 调用 rope: numHeads = 2, headDim = 16, posOffset = 0, base = 10000.0f
+        rope(q, actual_out, 2, 16, 0, 10000.0f);
 
         bool ok = check_close(actual_out.data(), ref_out.data(), ref_out.size(), 1e-4f, 1e-5f);
         if (ok) {

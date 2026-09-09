@@ -1,7 +1,7 @@
 #include "tensor.h"
+#include "check.h"
 #include <numeric>
 #include <stdexcept>
-#include <cassert>
 
 Tensor::Tensor(std::vector<int> shape) : shape_(std::move(shape)) {
     int rank = shape_.size();
@@ -33,7 +33,7 @@ Tensor::Tensor(std::vector<int> shape, const std::vector<float>& data) : shape_(
     }
     // 2. 拷贝数据
     data_ = data;
-    assert(data_.size() == (size_t)current_stride && "Data size does not match shape!");
+    NB_CHECK(data_.size() == (size_t)current_stride, "tensor ctor: data size does not match shape!");
 }
 
 size_t Tensor::numel() const {
@@ -48,8 +48,7 @@ void Tensor::reshape(std::vector<int> new_shape){
         new_strides[i] = current_stride;
         current_stride *= new_shape[i];
     }
-    assert(data_.size() == (size_t)current_stride && "reshape must preserve numel!");
-
+    NB_CHECK(data_.size() == (size_t)current_stride, "tensor reshape must preserve numel!");
     shape_ = std::move(new_shape);
     strides_ = std::move(new_strides);
 }
