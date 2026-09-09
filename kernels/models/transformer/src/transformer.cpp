@@ -5,6 +5,8 @@
 #include "ops.h"
 #include <vector>
 #include <cassert>
+#include <algorithm>
+#include <iostream>
 
 // 单层 Decoder Layer 前向: 
 // x -> RMSNorm -> Attention -> Add -> RMSNorm -> SwiGLU -> Add -> out
@@ -102,10 +104,37 @@ void transformer_forward(const std::vector<int>& token_ids,
 }
 
 // Stage 4 才会用到的生成逻辑，现在可以留空
-std::vector<int> generate(const std::vector<int>& prompt_ids,
-                          const TransformerWeights& w,
-                          const TransformerConfig& cfg,
-                          int max_new_tokens) {
-    // TODO: 实现自回归生成逻辑
-    return std::vector<int>();
+std::vector<int> generate(const std::vector<int>& prompt_ids, const TransformerWeights& w, const TransformerConfig& cfg, int max_new_tokens) {
+    std::vector<int> total_ids = prompt_ids;
+
+    for (int i = 0; i < max_new_tokens; ++i) {
+        int current_seq_len = total_ids.size();
+
+        // 1.
+        Tensor logits({current_seq_len, cfg.vocab_size});
+
+        // 2. 
+        transformer_forward(total_ids, w, cfg, logits);
+
+        // 3.
+        float* last_token_logits = logits.data() + (current_seq_len - 1) * cfg.vocab_size;
+
+        // 4. Greedy search (argmax)
+        int next_token_id = 0;
+        float max_logit = last_token_logits[0];
+        for (int v = 1; v < cfg.vocab_size; ++v) {
+            if (last_token_logits[v] > max_logit) {
+                max_logit = last_token_logits[v];
+                next_token_id = v;
+            }
+        }
+
+        // 5. 
+        total_ids.push_back(next_token_id);
+
+        std::cout << "Generated token: " << next_token_id << std::endl;
+
+        // if (next_token_id == cfg.eos_token_id) break;
+    }
+    return total_ids;
 }

@@ -41,5 +41,5 @@ add_executable(test_attention_block tests/test_attention_block.cpp)
 target_link_libraries(test_attention_block PRIVATE transformer_forward)
 
 # Stage 3 单测
-# add_executable(test_full_forward tests/test_full_forward.cpp)
-# target_link_libraries(test_full_forward PRIVATE transformer_forward)
+add_executable(test_full_forward tests/test_full_forward.cpp)
+target_link_libraries(test_full_forward PRIVATE transformer_forward)

@@ -10,6 +10,8 @@ struct DecoderLayerWeights{
     AttentionWeights attn;
     Tensor rms2_weight;
     FFNWeights ffn;
+
+    DecoderLayerWeights() = default;  // 前提是成员都能默认构造
 };
 
 struct TransformerWeights{
@@ -17,6 +19,8 @@ struct TransformerWeights{
     std::vector<DecoderLayerWeights> layers;
     Tensor final_rms_weight;
     Tensor lm_head;          // [d_model, vocab_size]
+
+    TransformerWeights() = default;   // 前提是成员都能默认构造
 };
 
 // 单层前向: x --> out , shape均[seq_len, d_model]

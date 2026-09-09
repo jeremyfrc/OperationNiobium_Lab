@@ -4,6 +4,8 @@
 
 class Tensor{
     public:
+        Tensor() = default;
+        
         explicit Tensor(std::vector<int> shape);
 
         Tensor(std::vector<int> shape, const std::vector<float>& data);

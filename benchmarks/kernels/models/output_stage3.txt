@@ -1,3 +1,5 @@
+./build/test_full_forward 
+✅ Stage 3: Full Forward Test Passed!
 $ ./build/test_attention_block 
 ========================================
        Running Attention Block Test     

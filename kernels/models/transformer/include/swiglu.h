@@ -7,7 +7,9 @@ struct FFNWeights{
     Tensor wUp;
     Tensor wDown;
 
-    FFNWeights(Tensor gate, Tensor up, Tensor down) : wGate(std::move(gate)), wUp(std::move(up)), wDown(std::move(down)) {}
+    FFNWeights(Tensor gate, Tensor up, Tensor down) : wGate(std::move(gate)), wUp(std::move(up)), wDown(std::move(down)) {};
+
+    FFNWeights() = default;
 };
 
 // // 1. 纯元素级激活算子 (Stage 1 单测直接测这个)

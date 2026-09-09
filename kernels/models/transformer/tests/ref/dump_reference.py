@@ -244,3 +244,91 @@ save_bin("attn_wK.bin", wK)
 save_bin("attn_wV.bin", wV)
 save_bin("attn_wO.bin", wO)
 save_bin("attn_out.bin", out_attn)
+
+
+# ==========================================
+# 6. Full Transformer Reference Data (Stage 3)
+# ==========================================
+
+def transformer_full_ref(token_ids, weights, cfg):
+    # 1. Embedding
+    x = weights['token_embedding'][token_ids]
+    
+    for i in range(cfg['n_layers']):
+        # --- Layer i ---
+        layer_w = weights['layers'][i]
+        
+        # Norm 1
+        x_norm1 = rmsnorm_ref(x, layer_w['rms1_weight'], cfg['eps'])
+        # Attn
+        attn_out = attention_ref(x_norm1, layer_w['wQ'], layer_w['wK'], layer_w['wV'], layer_w['wO'], cfg)
+        # Residual 1
+        x = x + attn_out
+        
+        # Norm 2
+        x_norm2 = rmsnorm_ref(x, layer_w['rms2_weight'], cfg['eps'])
+        # FFN
+        ffn_out = ffn_swiglu_ref(x_norm2, layer_w['w_gate'], layer_w['w_up'], layer_w['w_down'])
+        # Residual 2
+        x = x + ffn_out
+        
+    # Final Norm
+    x = rmsnorm_ref(x, weights['final_rms_weight'], cfg['eps'])
+    # Head
+    logits = x @ weights['lm_head']
+    return logits
+
+# 准备测试数据
+cfg_full = {
+    'n_layers': 2,
+    'num_heads': 4,
+    'num_kv_heads': 2,
+    'head_dim': 4,      # 对应 tiny_cfg.d_head = 4
+    'hidden_dim': 16,    # 对应 tiny_cfg.d_model = 16 (4 heads * 4 dim)
+    'ffn_dim': 32,
+    'vocab_size': 50,
+    'eps': 1e-5
+}
+
+# 随机生成整机权重
+weights = {
+    'token_embedding': rand(50, 16),
+    'layers': [],
+    'final_rms_weight': rand(16),
+    'lm_head': rand(16, 50)
+}
+
+for _ in range(cfg_full['n_layers']):
+    weights['layers'].append({
+        'rms1_weight': rand(16),
+        'wQ': rand(16, 16),
+        'wK': rand(16, 8),  # n_kv * d_head = 2 * 4 = 8
+        'wV': rand(16, 8),
+        'wO': rand(16, 16),
+        'rms2_weight': rand(16),
+        'w_gate': rand(16, 32),
+        'w_up': rand(16, 32),
+        'w_down': rand(32, 16)
+    })
+
+# 执行前向
+test_tokens = [1, 5, 42, 7]
+ref_logits = transformer_full_ref(test_tokens, weights, cfg_full)
+
+# 保存权重 (Stage 3)
+save_bin("full_embed.bin", weights['token_embedding'])
+save_bin("full_final_rms.bin", weights['final_rms_weight'])
+save_bin("full_lm_head.bin", weights['lm_head'])
+for i, layer in enumerate(weights['layers']):
+    save_bin(f"full_layer{i}_rms1.bin", layer['rms1_weight'])
+    save_bin(f"full_layer{i}_wQ.bin", layer['wQ'])
+    save_bin(f"full_layer{i}_wK.bin", layer['wK'])
+    save_bin(f"full_layer{i}_wV.bin", layer['wV'])
+    save_bin(f"full_layer{i}_wO.bin", layer['wO'])
+    save_bin(f"full_layer{i}_rms2.bin", layer['rms2_weight'])
+    save_bin(f"full_layer{i}_w_gate.bin", layer['w_gate'])
+    save_bin(f"full_layer{i}_w_up.bin", layer['w_up'])
+    save_bin(f"full_layer{i}_w_down.bin", layer['w_down'])
+
+# 保存输入输出
+save_bin("full_logits_ref.bin", ref_logits)
