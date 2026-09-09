@@ -43,3 +43,11 @@ target_link_libraries(test_attention_block PRIVATE transformer_forward)
 # Stage 3 单测
 add_executable(test_full_forward tests/test_full_forward.cpp)
 target_link_libraries(test_full_forward PRIVATE transformer_forward)
+
+# Stage 4 单测
+add_executable(test_generate tests/test_generate.cpp)
+target_link_libraries(test_generate PRIVATE transformer_forward)
+
+# Stage 5 性能benchmark
+add_executable(benchmark tests/benchmark.cpp)
+target_link_libraries(benchmark PRIVATE transformer_forward)

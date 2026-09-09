@@ -1,0 +1,60 @@
+==== before optimization ====
+$ ./build/benchmark
+Starting benchmark for 50 tokens...
+Generated token: 5
+Generated token: 9
+Generated token: 17
+Generated token: 38
+Generated token: 5
+Generated token: 3
+Generated token: 3
+Generated token: 9
+Generated token: 46
+Generated token: 5
+Generated token: 8
+Generated token: 7
+Generated token: 5
+Generated token: 43
+Generated token: 1
+Generated token: 8
+Generated token: 5
+Generated token: 3
+Generated token: 28
+Generated token: 5
+Generated token: 1
+Generated token: 8
+Generated token: 5
+Generated token: 9
+Generated token: 5
+Generated token: 7
+Generated token: 33
+Generated token: 5
+Generated token: 5
+Generated token: 9
+Generated token: 43
+Generated token: 8
+Generated token: 5
+Generated token: 26
+Generated token: 5
+Generated token: 5
+Generated token: 5
+Generated token: 33
+Generated token: 5
+Generated token: 1
+Generated token: 23
+Generated token: 43
+Generated token: 33
+Generated token: 9
+Generated token: 9
+Generated token: 9
+Generated token: 19
+Generated token: 1
+Generated token: 23
+Generated token: 22
+Time per token: 0.177344 ms
+Tokens per second: 5638.76
+
+
+
+===== after optimization =====
+

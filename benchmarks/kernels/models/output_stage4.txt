@@ -1,0 +1,8 @@
+Prompt: 1 5 42 
+Generated token: 5
+Generated token: 41
+Generated token: 22
+Generated token: 38
+Generated token: 22
+Generated: 1 5 42 5 41 22 38 22 
+✅ Generation Test Success!
