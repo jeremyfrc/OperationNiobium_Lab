@@ -48,6 +48,10 @@ target_link_libraries(test_full_forward PRIVATE transformer_forward)
 add_executable(test_generate tests/test_generate.cpp)
 target_link_libraries(test_generate PRIVATE transformer_forward)
 
+# Stage5 KV-Cache 版本的生成测试
+add_executable(test_generate_kv tests/test_generate_kv.cpp)
+target_link_libraries(test_generate_kv PRIVATE transformer_forward)
+
 # Stage 5 性能benchmark
 add_executable(benchmark tests/benchmark.cpp)
 target_link_libraries(benchmark PRIVATE transformer_forward)

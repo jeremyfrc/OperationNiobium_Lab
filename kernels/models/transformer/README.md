@@ -341,8 +341,8 @@ target_include_directories(transformer_forward PUBLIC include)
 - Stage4 的生成对拍用 **greedy argmax**(稳定性,不引入采样随机性),token id 序列要求逐位完全一致。
 
 ## 6. 自查清单(开写前过一遍)
-- [ ] d_model == n_heads * d_head` 校验输写了吗(哪怕只是个 assert)
-- [ ] GQA 的 K/V repeat 是不是真的跑到了(tiny_cfg 里 n_kv_heads=2 <= n_heads=4,别偷懒化成 MHA 测试)
-- [ ] causal mask 是否真的挡住了未来 token(建议 Stage2 专门加一个"空一下未来 token 的值,验证输出不变"的测试)
-- [ ] RoPE 的 position_offset 参数没设(Stage1-3 传 0,Stage4 才用得上)
-- [ ] 中间张量 dump 的文件
+- [x] d_model == n_heads * d_head` 校验输写了吗(哪怕只是个 assert)
+- [x] GQA 的 K/V repeat 是不是真的跑到了(tiny_cfg 里 n_kv_heads=2 <= n_heads=4,别偷懒化成 MHA 测试)
+- [x] causal mask 是否真的挡住了未来 token(建议 Stage2 专门加一个"空一下未来 token 的值,验证输出不变"的测试)
+- [x] RoPE 的 position_offset 参数没设(Stage1-3 传 0,Stage4 才用得上)
+- [X] 中间张量 dump 的文件

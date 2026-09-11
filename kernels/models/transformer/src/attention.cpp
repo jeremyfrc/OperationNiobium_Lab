@@ -103,3 +103,98 @@ void attention_forward(const Tensor& x, const AttentionWeights& w, const Transfo
     // 6. Final Projection (Wo)
     matmul(c_linear, w.wO, out);
 }
+
+
+void attention_forward_kv(const Tensor& x, const AttentionWeights& w, const TransformerConfig& cfg, Tensor& out, KVCache& kv_cache, int layer_idx, int pos_offset) {
+    int seq_len = x.shape()[0];
+    int d_model = cfg.d_model;
+    int n_heads = cfg.n_heads;
+    int n_kv_heads = cfg.n_kv_heads;
+    int d_head = cfg.d_head;
+    int kv_group_size = n_heads / n_kv_heads;
+
+    // P3. 入口按config 钉死形状，传错tensor 当场炸，不让他漂到输出
+    NB_CHECK(d_model == n_heads * d_head, "attention: d_model must equal n_heads*d_head");
+    NB_CHECK(n_heads % n_kv_heads == 0, "attention: n_heads must be divisible by n_kv_heads (GQA)");
+    NB_CHECK(x.shape()[1] == d_model, "attention: input last dim must be d_model");
+    NB_CHECK(w.wQ.shape()[0] == d_model && w.wQ.shape()[1] == n_heads * d_head, "attention: wQ shape [d_model, n_heads*d_head]");
+    NB_CHECK(w.wK.shape()[0] == d_model && w.wK.shape()[1] == n_kv_heads * d_head, "attention: wK shape [d_model, n_kv_heads*d_head]");
+    NB_CHECK(w.wV.shape()[0] == d_model && w.wV.shape()[1] == n_kv_heads * d_head, "attention: wV shape [d_model, n_kv_heads*d_head]");
+    NB_CHECK(w.wO.shape()[0] == n_heads * d_head && w.wO.shape()[1] == d_model, "attention: wO shape [n_heads*d_head, d_model]");
+
+
+    // 1. 投影计算 q, k, v (x @ w)
+    Tensor q_linear({seq_len, n_heads * d_head});
+    Tensor k_linear({seq_len, n_kv_heads * d_head});
+    Tensor v_linear({seq_len, n_kv_heads * d_head});
+    matmul(x, w.wQ, q_linear);
+    matmul(x, w.wK, k_linear);
+    matmul(x, w.wV, v_linear);
+
+    // 2. RoPE: 循环 seq_len 次，每次 apply_rope(q_i, k_i, pos_offset + i)
+    q_linear.reshape({seq_len * n_heads, d_head});
+    rope_inplace(q_linear, n_heads, d_head, pos_offset, cfg.rope_theta);
+    q_linear.reshape({seq_len, n_heads * d_head});
+
+    k_linear.reshape({seq_len * n_kv_heads, d_head});
+    rope_inplace(k_linear, n_kv_heads, d_head, pos_offset, cfg.rope_theta);
+    k_linear.reshape({seq_len, n_kv_heads * d_head});
+
+    // 3. 缓存管理:
+    // 将计算出的 k, v 写入 cache.k_caches[layer_idx] 和 cache.v_caches[layer_idx]
+    // 目标地址: data + (pos_offset + i) * n_kv_heads * d_head
+    int kv_stride = n_kv_heads * d_head;
+    float* kc = kv_cache.k_caches[layer_idx].data();
+    float* vc = kv_cache.v_caches[layer_idx].data();
+
+    for (int i = 0; i < seq_len; ++i) {
+        int abs = pos_offset + i;
+        std::copy(k_linear.data() + i * kv_stride, k_linear.data() + (i + 1) * kv_stride, kc + abs * kv_stride);
+        std::copy(v_linear.data() + i * kv_stride, v_linear.data() + (i + 1) * kv_stride, vc + abs * kv_stride);
+    }
+
+    // 4. 这段新的输入一共会和 [0, pos_offset+seq_len) 的历史 token 做注意力
+    int total_ctx = pos_offset + seq_len;
+
+    Tensor scores({n_heads, seq_len, total_ctx});
+    float scale = 1.0f / std::sqrt((float)d_head);
+
+    for (int h = 0; h < n_heads; ++h){
+        int kv_h = h / kv_group_size;
+        for (int i = 0; i < seq_len; ++i){
+            int abs_i = pos_offset + i;
+            for (int j = 0; j < total_ctx; ++j) {
+                if (j > abs_i) { scores.at({h, i, j}) = -1e9f; continue;}
+                float sum = 0;
+                for (int d = 0; d < d_head; ++d) {
+                    float qv = q_linear.data()[head_flat(i, h, d, n_heads, d_head)];
+                    float kv_ = kc[j * kv_stride + kv_h * d_head + d];
+                    sum += qv * kv_;
+                }
+                scores.at({h, i, j}) = sum * scale;
+            }
+        }
+    }
+
+    // 5. softmax 沿最后一维 (total_ctx)
+    softmax_inplace(scores);
+
+    // 6. context = scores @ V，V 也从 cache 读
+    Tensor ctx({seq_len, n_heads * d_head});
+    for (int h = 0; h < n_heads; ++h) {
+        int kv_h = h / kv_group_size;
+        for (int i = 0; i < seq_len; ++i) {
+            int abs_i = pos_offset + i;
+            for (int d = 0; d < d_head; ++d) {
+                float sum = 0;
+                for (int j = 0; j <= abs_i; ++j) {
+                    sum += scores.at({h, i, j}) * vc[j * kv_stride + kv_h * d_head + d];
+                }
+                ctx.data()[i * (n_heads * d_head) + h * d_head + d] = sum;
+            }
+        }
+    }
+
+    // 7. 若 seq_len>1（prefill）要 reshape 后 matmul；decode 时直接 matmul
+    matmul(ctx, w.wO, out);
+}
