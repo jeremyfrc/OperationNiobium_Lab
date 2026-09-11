@@ -1,3 +1,5 @@
+#pragma once
+#include "tensor.h"
 // RoPE 旋转位置编码算子（In-place 原地计算）
 // x: 输入并直接覆写的 Tensor，Shape 为 [seq_len, num_heads, head_dim] 或 [seq_len * num_heads, head_dim]
 //  ---- 契约： x最后一维必须等于head_dim(内部会断言)。
@@ -14,3 +16,6 @@
 //   加载真实 Llama / HF 权重，需先将 Q/K 权重按对应关系做一次行置换，或改写为
 //   split-half 实现，否则会静默产生错误结果（不报错，只是输出变乱）。
 void rope_inplace(Tensor& x, int numHeads, int headDim, int posOffset = 0, float base = 10000.0f);
+
+// Out-of-place 接口（如果需要保持兼容）
+void rope(const Tensor& x, Tensor& out, int numHeads, int headDim, int posOffset = 0, float base = 10000.0f);
