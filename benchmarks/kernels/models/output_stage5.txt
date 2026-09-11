@@ -1,26 +1,5 @@
 $ ./build/benchmark 
-Generated token: 5
-Generated token: 41
-Generated token: 22
-Generated token: 38
-Generated token: 22
-Generated token: 23
-Generated token: 45
-Generated token: 28
-Generated token: 27
-Generated token: 27
-Generated token: 27
-Generated token: 22
-Generated token: 46
-Generated token: 5
-Generated token: 45
-Generated token: 22
-Generated token: 38
-Generated token: 33
-Generated token: 46
-Generated token: 5
 ===== Benchmark (new_tokens=20) =====
-Non-KV : 1.37186 ms  (0.0685929 ms/token, 14578.8 tok/s)
-KV     : 0.112036 ms  (0.0056018 ms/token, 178514 tok/s)
-Speedup (Non-KV / KV): 12.2448x
-✅ outputs identical
+Non-KV : 0.922419 ms  (0.046121 ms/token, 21682.1 tok/s)
+KV     : 0.092084 ms  (0.0046042 ms/token, 217193 tok/s)
+Speedup (Non-KV / KV): 10.0171x

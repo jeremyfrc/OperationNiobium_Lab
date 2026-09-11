@@ -3,6 +3,7 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
+#include <algorithm>
 
 
 // 测量一次生成耗时（毫秒）
@@ -37,20 +38,25 @@ int main() {
     double ms_nokv = time_generate(false, prompt, weights, cfg, new_tokens, ids_nokv);
 
     // ---- 跑 KV 版 ----
+    // warmup
+    generate_kv(prompt, weights, cfg, new_tokens);
+    std::vector<double> times;
     std::vector<int> ids_kv;
-    double ms_kv = time_generate(true, prompt, weights, cfg, new_tokens, ids_kv);
+    for (int r = 0; r < 20; ++r) times.push_back(time_generate(true, prompt, weights, cfg, new_tokens, ids_kv));
+    std::sort(times.begin(), times.end());
+    double median = times[times.size()/2];
 
     // ---- 输出性能 ----
     std::cout << "===== Benchmark (new_tokens=" << new_tokens << ") =====\n";
     std::cout << "Non-KV : " << ms_nokv << " ms  ("
               << (ms_nokv / new_tokens) << " ms/token, "
               << (1000.0 * new_tokens / ms_nokv) << " tok/s)\n";
-    std::cout << "KV     : " << ms_kv   << " ms  ("
-              << (ms_kv / new_tokens) << " ms/token, "
-              << (1000.0 * new_tokens / ms_kv) << " tok/s)\n";
+    std::cout << "KV     : " << median   << " ms  ("
+              << (median / new_tokens) << " ms/token, "
+              << (1000.0 * new_tokens / median) << " tok/s)\n";
 
-    if (ms_kv > 0)
-        std::cout << "Speedup (Non-KV / KV): " << (ms_nokv / ms_kv) << "x\n";
+    if (median > 0)
+        std::cout << "Speedup (Non-KV / KV): " << (ms_nokv / median) << "x\n";
 
     // ---- 顺带验证两条路径结果一致 ----
     bool same = (ids_kv.size() == ids_nokv.size());

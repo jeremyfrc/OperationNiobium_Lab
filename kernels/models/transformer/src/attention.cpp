@@ -60,9 +60,10 @@ void attention_forward(const Tensor& x, const AttentionWeights& w, const Transfo
     for (int h = 0; h < n_heads; ++h) {
         int kv_h = h / kv_group_size;
         for (int i = 0; i < seq_len; ++i) {
+            float* srow = scores.data() + (h * seq_len + i) * seq_len;  //hoist
             for (int j = 0; j < seq_len; ++j) {
                 if (j > i) {
-                    scores.at({h, i, j}) = -1e9f;
+                    srow[j] = -1e9f;
                     continue;
                 }
 
@@ -73,8 +74,7 @@ void attention_forward(const Tensor& x, const AttentionWeights& w, const Transfo
                     float k_val = k_linear.data()[head_flat(j, kv_h, d, n_kv_heads, d_head)];
                     sum += q_val * k_val;
                 }
-
-                scores.at({h, i, j}) = sum * scale;
+                srow[j] = sum * scale;
             }
         }
     }
@@ -88,10 +88,11 @@ void attention_forward(const Tensor& x, const AttentionWeights& w, const Transfo
     for (int h = 0; h < n_heads; ++h){
         int kv_h = h / kv_group_size;
         for (int i =  0; i < seq_len; ++i) {
+            float* srow = scores.data() + (h * seq_len + i) * seq_len; // hoist
             for (int d = 0; d < d_head; ++d){
                 float sum = 0.0f;
                 for (int j = 0; j <= i; ++j){
-                    float s_val = scores.at({h, i, j});
+                    float s_val = srow[j];
                     float v_val = v_linear.data()[head_flat(j, kv_h, d, n_kv_heads, d_head)];
                     sum += s_val * v_val;
                 }
@@ -99,13 +100,13 @@ void attention_forward(const Tensor& x, const AttentionWeights& w, const Transfo
             }
         }
     }
-  
     // 6. Final Projection (Wo)
     matmul(c_linear, w.wO, out);
 }
 
 
 void attention_forward_kv(const Tensor& x, const AttentionWeights& w, const TransformerConfig& cfg, Tensor& out, KVCache& kv_cache, int layer_idx, int pos_offset) {
+
     int seq_len = x.shape()[0];
     int d_model = cfg.d_model;
     int n_heads = cfg.n_heads;
@@ -114,6 +115,8 @@ void attention_forward_kv(const Tensor& x, const AttentionWeights& w, const Tran
     int kv_group_size = n_heads / n_kv_heads;
 
     // P3. 入口按config 钉死形状，传错tensor 当场炸，不让他漂到输出
+    NB_CHECK(pos_offset >= 0, "attention_kv: pos_offset must be >= 0");
+    NB_CHECK(pos_offset + seq_len <= kv_cache.capacity, "attention_kv: KV cache overflow (pos_offset+seq_len > capacity)");
     NB_CHECK(d_model == n_heads * d_head, "attention: d_model must equal n_heads*d_head");
     NB_CHECK(n_heads % n_kv_heads == 0, "attention: n_heads must be divisible by n_kv_heads (GQA)");
     NB_CHECK(x.shape()[1] == d_model, "attention: input last dim must be d_model");
@@ -163,15 +166,15 @@ void attention_forward_kv(const Tensor& x, const AttentionWeights& w, const Tran
         int kv_h = h / kv_group_size;
         for (int i = 0; i < seq_len; ++i){
             int abs_i = pos_offset + i;
+            float* srow = scores.data() + (h * seq_len + i) * total_ctx;  // hoist
             for (int j = 0; j < total_ctx; ++j) {
-                if (j > abs_i) { scores.at({h, i, j}) = -1e9f; continue;}
+                if (j > abs_i) { srow[j] = -1e9f; continue;}
                 float sum = 0;
                 for (int d = 0; d < d_head; ++d) {
                     float qv = q_linear.data()[head_flat(i, h, d, n_heads, d_head)];
-                    float kv_ = kc[j * kv_stride + kv_h * d_head + d];
-                    sum += qv * kv_;
+                    sum += qv * kc[j * kv_stride + kv_h * d_head + d];
                 }
-                scores.at({h, i, j}) = sum * scale;
+                srow[j] = sum * scale;
             }
         }
     }
@@ -185,10 +188,11 @@ void attention_forward_kv(const Tensor& x, const AttentionWeights& w, const Tran
         int kv_h = h / kv_group_size;
         for (int i = 0; i < seq_len; ++i) {
             int abs_i = pos_offset + i;
+            float* srow = scores.data() + (h * seq_len + i) * total_ctx;
             for (int d = 0; d < d_head; ++d) {
                 float sum = 0;
                 for (int j = 0; j <= abs_i; ++j) {
-                    sum += scores.at({h, i, j}) * vc[j * kv_stride + kv_h * d_head + d];
+                    sum += srow[j] * vc[j * kv_stride + kv_h * d_head + d];
                 }
                 ctx.data()[i * (n_heads * d_head) + h * d_head + d] = sum;
             }

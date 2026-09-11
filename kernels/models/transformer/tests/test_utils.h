@@ -1,5 +1,6 @@
 #pragma once
 #include "transformer.h" 
+#include "utils.h"
 #include <fstream>
 #include <vector>
 #include <cmath>

@@ -7,21 +7,8 @@
 #include <vector>
 #include <cassert>
 #include <algorithm>
-#include <iostream>
+#include "utils.h"
 
-
-// 返回 logits 中最大值的下标
-static int argmax(const float* logits, int n) {
-    int best = 0;
-    float best_val = logits[0];
-    for (int i = 1; i < n; ++i) {
-        if (logits[i] > best_val) {
-            best_val = logits[i];
-            best = i;
-        }
-    }
-    return best;
-}
 
 // 单层 Decoder Layer 前向: 
 // x -> RMSNorm -> Attention -> Add -> RMSNorm -> SwiGLU -> Add -> out
@@ -34,7 +21,7 @@ void decoder_layer_forward(const Tensor& x,
 
     // 1. Pre-attention RMSNorm
     Tensor x_norm1({seq_len, d_model});
-    // TODO: 调用 rmsnorm(x, w.rms1_weight, cfg.rms_eps, x_norm1);
+    // 调用 rmsnorm(x, w.rms1_weight, cfg.rms_eps, x_norm1);
     rmsnorm(x, w.rms1_weight, x_norm1, cfg.rms_eps);
 
     // 2. Attention
@@ -44,20 +31,20 @@ void decoder_layer_forward(const Tensor& x,
     // 3. Residual Connection 1 (x = x + attn_out)
     // 注意：为了不破坏输入的 x（如果后面还要用），我们先拷贝一份或者直接输出到 out
     std::copy(x.data(), x.data() + x.numel(), out.data());
-    // TODO: 调用 add_inplace(out, attn_out);
+    // 调用 add_inplace(out, attn_out);
     add_inplace(out, attn_out);
 
     // 4. Pre-FFN RMSNorm
     Tensor x_norm2({seq_len, d_model});
-    // TODO: 调用 rmsnorm(out, w.rms2_weight, cfg.rms_eps, x_norm2);
+    // 调用 rmsnorm(out, w.rms2_weight, cfg.rms_eps, x_norm2);
     rmsnorm(out, w.rms2_weight, x_norm2, cfg.rms_eps);
     // 5. Feed Forward (SwiGLU)
     Tensor ffn_out({seq_len, d_model});
-    // TODO: 调用 swiglu_forward(x_norm2, w.ffn, ffn_out);
+    // 调用 swiglu_forward(x_norm2, w.ffn, ffn_out);
     swiglu_forward(x_norm2, w.ffn, ffn_out);
 
     // 6. Residual Connection 2 (out = out + ffn_out)
-    // TODO: 调用 add_inplace(out, ffn_out);
+    // 调用 add_inplace(out, ffn_out);
     add_inplace(out, ffn_out);
 }
 
@@ -70,7 +57,6 @@ void transformer_forward(const std::vector<int>& token_ids, const TransformerWei
     // 将 token_ids 转换为 [seq_len, d_model] 的 Tensor
     Tensor x({seq_len, d_model});
     
-    // TODO: 实现 Embedding 查表逻辑
     /*
     for (int i = 0; i < seq_len; ++i) {
         int token_id = token_ids[i];
@@ -91,13 +77,10 @@ void transformer_forward(const std::vector<int>& token_ids, const TransformerWei
     Tensor buffer_a({seq_len, d_model});
     std::copy(x.data(), x.data() + x.numel(), buffer_a.data());
     Tensor buffer_b({seq_len, d_model});
-    std::copy(x.data(), x.data() + x.numel(), buffer_b.data());
     Tensor* input_ptr = &buffer_a;
     Tensor* output_ptr = &buffer_b;
 
     for (int l = 0; l < cfg.n_layers; ++l) {
-        Tensor current_layer_out({seq_len, d_model});
-        // TODO: 调用 decoder_layer_forward(layer_in_out, w.layers[l], cfg, current_layer_out);
         decoder_layer_forward(*input_ptr, w.layers[l], cfg, *output_ptr);
         // 更新 layer_in_out = current_layer_out，准备下一层
         std::swap(input_ptr, output_ptr);
@@ -105,12 +88,12 @@ void transformer_forward(const std::vector<int>& token_ids, const TransformerWei
 
     // 3. Final RMSNorm
     Tensor x_final_norm({seq_len, d_model});
-    // TODO: 调用 rmsnorm(layer_in_out, w.final_rms_weight, cfg.rms_eps, x_final_norm);
+    // 调用 rmsnorm(layer_in_out, w.final_rms_weight, cfg.rms_eps, x_final_norm);
     rmsnorm(*input_ptr, w.final_rms_weight, x_final_norm, cfg.rms_eps);
 
     // 4. LM Head (Linear to Logits)
     // logits 维度应该是 [seq_len, vocab_size]
-    // TODO: 调用 matmul(x_final_norm, w.lm_head, logits);
+    // 调用 matmul(x_final_norm, w.lm_head, logits);
     matmul(x_final_norm, w.lm_head, logits);
 }
 
@@ -121,13 +104,13 @@ std::vector<int> generate(const std::vector<int>& prompt_ids, const TransformerW
     for (int i = 0; i < max_new_tokens; ++i) {
         int current_seq_len = total_ids.size();
 
-        // 1.
+        // 1. 创建用于存储输出的 logits Tensor [current_seq_len, vocab_size]
         Tensor logits({current_seq_len, cfg.vocab_size});
 
-        // 2. 
+        // 2. 调用 Stage 3 已经写好的 forward
         transformer_forward(total_ids, w, cfg, logits);
 
-        // 3.
+        // 3. 取出最后一个 token 的 logits, 最后一个 token 的起始指针： logits.data() + (last_row_index * vocab_size)
         float* last_token_logits = logits.data() + (current_seq_len - 1) * cfg.vocab_size;
 
         // 4. Greedy search (argmax)
@@ -140,10 +123,9 @@ std::vector<int> generate(const std::vector<int>& prompt_ids, const TransformerW
             }
         }
 
-        // 5. 
+        // 5. 把它存入序列
         total_ids.push_back(next_token_id);
-
-        std::cout << "Generated token: " << next_token_id << std::endl;
+        //std::cout << "Generated token: " << next_token_id << std::endl;
 
         // if (next_token_id == cfg.eos_token_id) break;
     }
