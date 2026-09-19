@@ -27,7 +27,7 @@ class BlockTable {
   BlockTable(const BlockTable&) = delete;
   BlockTable& operator=(const BlockTable&) = delete;
   BlockTable(BlockTable&&) noexcept = default;
-  BlockTable& operator=(BlockTable&&) noexcept = default;
+  BlockTable& operator=(BlockTable&&) noexcept;
 
   // 保证能容纳 num_tokens 个 token；差几块补几块。
   // 中途 allocate() 返回 kInvalidBlock 时，把本次已分配的块全部 decref 回滚，

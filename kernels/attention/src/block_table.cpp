@@ -9,6 +9,16 @@ namespace attn {
 
 BlockTable::BlockTable(BlockAllocator* alloc) : alloc_(alloc) {}
 
+BlockTable& BlockTable::operator=(BlockTable&& b) noexcept {
+    if (this == &b) return *this;
+    for (BlockId id : blocks_) alloc_->decref(id);
+    alloc_ = b.alloc_;
+    blocks_ = std::move(b.blocks_);
+    numTokens_ = b.numTokens_;
+    b.numTokens_ = 0;
+    return *this;
+}
+
 BlockTable::~BlockTable() {
     for (BlockId id: blocks_) alloc_->decref(id);
 }
