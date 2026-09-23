@@ -126,12 +126,12 @@ static void test_interleaved_two_tables() {
   make_src(kB, true,  1, 0, nB);  make_src(vB, false, 1, 0, nB);
 
   cache.write(0, a, 0, kA.data(), vA.data(), nA);
-  cache.write(1, b, 0, kB.data(), vB.data(), nB);
+  cache.write(0, b, 0, kB.data(), vB.data(), nB);
 
   std::vector<float> kAOut((size_t)nA * kTokElems), vAOut((size_t)nA * kTokElems);
   std::vector<float> kBOut((size_t)nB * kTokElems), vBOut((size_t)nB * kTokElems);
   cache.gather(0, a, nA, kAOut.data(), vAOut.data());
-  cache.gather(1, b, nB, kBOut.data(), vBOut.data());
+  cache.gather(0, b, nB, kBOut.data(), vBOut.data());
 
   CHECK(std::memcmp(kAOut.data(), kA.data(), kA.size() * sizeof(float)) == 0);
   CHECK(std::memcmp(vAOut.data(), vA.data(), vA.size() * sizeof(float)) == 0);

@@ -19,6 +19,13 @@ BlockTable& BlockTable::operator=(BlockTable&& b) noexcept {
     return *this;
 }
 
+BlockTable::BlockTable(BlockTable&& other) noexcept
+    : alloc_(other.alloc_),
+      numTokens_(other.numTokens_),
+      blocks_(std::move(other.blocks_)) {
+  other.numTokens_ = 0;
+}
+
 BlockTable::~BlockTable() {
     for (BlockId id: blocks_) alloc_->decref(id);
 }
