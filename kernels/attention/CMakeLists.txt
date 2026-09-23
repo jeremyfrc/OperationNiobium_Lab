@@ -11,7 +11,9 @@ add_library(attn_blocks
     src/block_table.cpp
     src/paged_kv_cache.cpp
 )
-target_include_directories(attn_blocks PUBLIC include)
+target_include_directories(attn_blocks PUBLIC
+    include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common)   # kernels/common (共享 check.h)
 
 # ===== 单测 target =====
 add_executable(test_block_allocator tests/test_block_allocator.cpp)

@@ -17,7 +17,9 @@ add_library(transformer_forward
 )
 
 # 2. 指定头文件目录：PUBLIC 意味着链接这个库的目标（如测试）也能自动使用 include/ 里的头文件
-target_include_directories(transformer_forward PUBLIC include)
+target_include_directories(transformer_forward PUBLIC
+    include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../common)   # kernels/common (共享 check.h)
 
 # ==============================================================================
 # 3. 测试 target 注册（等写到对应 Stage 再取消注释，先放在这里做脚手架）
@@ -55,3 +57,30 @@ target_link_libraries(test_generate_kv PRIVATE transformer_forward)
 # Stage 5 性能benchmark
 add_executable(benchmark tests/benchmark.cpp)
 target_link_libraries(benchmark PRIVATE transformer_forward)
+
+enable_testing()
+
+add_test(NAME test_rmsnorm        COMMAND test_rmsnorm)
+add_test(NAME test_rope           COMMAND test_rope)
+add_test(NAME test_softmax        COMMAND test_softmax)
+add_test(NAME test_swiglu         COMMAND test_swiglu)
+add_test(NAME test_attention_block COMMAND test_attention_block)
+add_test(NAME test_full_forward   COMMAND test_full_forward)
+add_test(NAME test_generate       COMMAND test_generate)
+add_test(NAME test_generate_kv    COMMAND test_generate_kv)
+add_test(NAME benchmark           COMMAND benchmark)
+
+# 这些测试用相对路径 "tests/ref/data/*.bin" 读参考数据, 工作目录必须设为
+# 源码根(transformer/), 否则 ctest 默认在 build/ 下找不到数据文件。
+set(TSFM_TESTS
+    test_rmsnorm
+    test_rope
+    test_softmax
+    test_swiglu
+    test_attention_block
+    test_full_forward
+    test_generate
+    test_generate_kv
+    benchmark)
+set_tests_properties(${TSFM_TESTS} PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

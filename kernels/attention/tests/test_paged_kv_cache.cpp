@@ -3,20 +3,20 @@
 //   1. 写 17 个 token(跨 5 块) 再 gather -> 与源 bit-identical
 //   2. 跨块边界正确: 第 4/第 5 个 token 分属不同块, 值不串
 //   3. 两个 BlockTable 用同一 allocator 交错分配, 各自 gather 互不污染
-//   4. write 越界 -> NB_CHECK 拦下 (NB_CHECK 是 abort, 用 fork 子进程测)
-
+//   4. write / gather 越界 -> NB_CHECK 抛 std::runtime_error 拦下
 #include "block_allocator.h"
 #include "block_table.h"
 #include "paged_kv_cache.h"
 
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 #include <vector>
+
+using namespace attn;
 
 #include <sys/wait.h>
 #include <unistd.h>
-
-using namespace attn;
 
 static int g_failed = 0;
 #define CHECK(cond)                                                       \
@@ -146,27 +146,43 @@ static void test_interleaved_two_tables() {
       CHECK(a.blocks()[i] != a.blocks()[j]);
 }
 
-// ---- 验收4: write 越界 -> NB_CHECK abort (子进程测, abort 不可 catch) ----
+// ---- 验收4a: write 越界 -> NB_CHECK 抛异常 ----
 static void test_write_out_of_range() {
-  pid_t pid = fork();
-  if (pid == 0) {
-    // 子进程: 造一个越界 write, 期望被 NB_CHECK abort
-    BlockAllocator alloc(kNumBlk, kBlockSz);
-    BlockTable table(&alloc);
-    PagedKVCache cache(kNLayers, kNKvHeads, kDHead, kNumBlk, kBlockSz);
-    table.ensure_capacity(kBlockSz);
-    table.append_tokens(kBlockSz);   // num_tokens=4
+  BlockAllocator alloc(kNumBlk, kBlockSz);
+  BlockTable table(&alloc);
+  PagedKVCache cache(kNLayers, kNKvHeads, kDHead, kNumBlk, kBlockSz);
+  table.ensure_capacity(kBlockSz);
+  table.append_tokens(kBlockSz);   // num_tokens=4
 
-    std::vector<float> kSrc((size_t)8 * kTokElems, 1.f);
-    std::vector<float> vSrc((size_t)8 * kTokElems, 1.f);
-    // startPos=0, n=8 -> 8 > num_tokens(4): 越界
-    cache.write(0, table, 0, kSrc.data(), vSrc.data(), 8);
-    _exit(0);   // 若没 abort, 说明没拦住 -> 正常退出(码0), 父进程会判失败
+  std::vector<float> kSrc((size_t)8 * kTokElems, 1.f);
+  std::vector<float> vSrc((size_t)8 * kTokElems, 1.f);
+
+  bool threw = false;
+  try {
+    cache.write(0, table, 0, kSrc.data(), vSrc.data(), 8);   // 8 > 4: 越界
+  } catch (const std::runtime_error&) {
+    threw = true;
   }
-  int status = 0;
-  waitpid(pid, &status, 0);
-  // 期望子进程非正常退出 (SIGABRT)
-  CHECK(WIFSIGNALED(status));   // 被信号杀死 = 断言生效
+  CHECK(threw);
+}
+
+// ---- 验收4b: gather 越界 -> NB_CHECK 抛异常 ----
+static void test_gather_out_of_range() {
+  BlockAllocator alloc(kNumBlk, kBlockSz);
+  BlockTable table(&alloc);
+  PagedKVCache cache(kNLayers, kNKvHeads, kDHead, kNumBlk, kBlockSz);
+  table.ensure_capacity(kBlockSz);
+  table.append_tokens(kBlockSz);   // num_tokens=4
+
+  std::vector<float> kDst((size_t)8 * kTokElems), vDst((size_t)8 * kTokElems);
+
+  bool threw = false;
+  try {
+    cache.gather(0, table, 8, kDst.data(), vDst.data());     // 8 > 4: 越界
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  CHECK(threw);
 }
 
 int main() {
@@ -174,6 +190,7 @@ int main() {
   test_cross_block_boundary();
   test_interleaved_two_tables();
   test_write_out_of_range();
+  test_gather_out_of_range();
 
   if (g_failed == 0) {
     std::printf("test_paged_kv_cache: ALL PASSED\n");
