@@ -48,7 +48,8 @@ bool BlockTable::ensure_capacity(int numTokens) {
 std::pair<BlockId, int> BlockTable::locate(int tokenPos) const {
 
     const int blockSize = alloc_->block_size();
-    NB_CHECK(tokenPos >= 0 && tokenPos / blockSize < (int)blocks_.size(), "Token index out of boundary!");
+    const int nBlocks = static_cast<int>(blocks_.size());
+    NB_CHECK(tokenPos >= 0 && tokenPos / blockSize < nBlocks, "Token index out of boundary!");
     const int blockIdx = tokenPos / blockSize;
     return { blocks_[blockIdx], tokenPos % blockSize };
 }
