@@ -4,7 +4,7 @@
 
 #include "block.h"
 
-namespace attn {
+namespace paged_kv {
 
 class BlockAllocator;  // 前向声明；生命周期由外部保证
 
@@ -58,4 +58,4 @@ class BlockTable {
   std::vector<BlockId> blocks_;  // logical block idx -> physical BlockId
 };
 
-}  // namespace attn
+}  // namespace paged_kv

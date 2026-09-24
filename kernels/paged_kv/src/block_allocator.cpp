@@ -2,7 +2,7 @@
 #include "check.h"
 
 
-namespace attn{
+namespace paged_kv{
 
 BlockAllocator::BlockAllocator(int numBlocks, int blockSize, ZeroRefPolicy policy): numBlocks_(numBlocks), blockSize_(blockSize), policy_(policy) {
     
@@ -82,4 +82,4 @@ int BlockAllocator::num_allocated() const {
     return numBlocks_ - num_free();
 }
 
-} // attn
+} // namespace paged_kv

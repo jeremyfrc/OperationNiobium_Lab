@@ -5,7 +5,7 @@
 
 #include <algorithm>
 
-namespace attn {
+namespace paged_kv {
 
 BlockTable::BlockTable(BlockAllocator* alloc) : alloc_(alloc) {}
 
@@ -79,4 +79,4 @@ BlockTable BlockTable::clone_shared() const {
     return clone;
 }
 
-} // namespace attn
+} // namespace paged_kv

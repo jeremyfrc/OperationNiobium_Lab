@@ -2,7 +2,7 @@
 #include <string>
 #include <stdexcept>
 
-namespace attn {
+namespace paged_kv {
 
 struct SchedulerError: std::runtime_error {
     using std::runtime_error::runtime_error;
@@ -13,4 +13,4 @@ class OutOfBlocksError: public std::runtime_error {
     public:
         explicit OutOfBlocksError(const std::string& what) : std::runtime_error(what) {}
 };
-}
+} // namesapce paged_kv

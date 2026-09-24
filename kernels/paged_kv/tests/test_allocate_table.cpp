@@ -11,7 +11,7 @@
 #include <cstdio>
 #include <utility>
 
-using namespace attn;
+using namespace paged_kv;
 
 static int g_failed = 0;
 #define CHECK(cond)                                                       \

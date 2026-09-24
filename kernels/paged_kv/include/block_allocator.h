@@ -6,7 +6,7 @@
 #include "block.h"
 #include "check.h"
 
-namespace attn {
+namespace paged_kv {
 
 // decref 归零时的处置策略（Stage A-1 只实现第一种）。
 enum class ZeroRefPolicy {
@@ -66,5 +66,5 @@ class BlockAllocator {
   bool valid_id(BlockId id) const { return id >= 0 && id < numBlocks_; }
 };
 
-}  // namespace attn
+}  // namespace paged_kv
 

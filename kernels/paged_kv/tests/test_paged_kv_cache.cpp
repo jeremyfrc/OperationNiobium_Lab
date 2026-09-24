@@ -16,7 +16,7 @@
 #include <stdexcept>
 #include <vector>
 
-using namespace attn;
+using namespace paged_kv;
 
 static int g_failed = 0;
 #include <sys/wait.h>

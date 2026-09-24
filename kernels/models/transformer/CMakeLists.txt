@@ -21,6 +21,19 @@ target_include_directories(transformer_forward PUBLIC
     include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common)   # kernels/common (共享 check.h)
 
+# 注: paged_kv_blocks 由顶层 kernels/CMakeLists.txt 的 add_subdirectory(paged_kv) 提供
+
+# ===== 集成层: paged attention 入口 + 对拍测试 (只有这里依赖 paged_kv) =====
+add_library(transformer_paged
+    src/attention_paged.cpp
+)
+
+target_link_libraries(transformer_paged
+    PUBLIC transformer_forward
+    PUBLIC paged_kv_blocks
+)
+target_include_directories(transformer_paged PUBLIC include)   # 已由 transformer_forward 带; 保险
+
 # ==============================================================================
 # 3. 测试 target 注册（等写到对应 Stage 再取消注释，先放在这里做脚手架）
 # ==============================================================================
@@ -82,5 +95,7 @@ set(TSFM_TESTS
     test_generate
     test_generate_kv
     benchmark)
+
 set_tests_properties(${TSFM_TESTS} PROPERTIES
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+

@@ -7,7 +7,7 @@
 namespace {
 
 template<class Fn>
-void for_each_span(const attn::BlockTable& table, int blockSize, int startPos, int endPos, Fn f){
+void for_each_span(const paged_kv::BlockTable& table, int blockSize, int startPos, int endPos, Fn f){
     int pos = startPos;
     while (pos < endPos) {
       auto [blk, off] = table.locate(pos);
@@ -18,7 +18,7 @@ void for_each_span(const attn::BlockTable& table, int blockSize, int startPos, i
 }
 } // namespace
 
-namespace attn {
+namespace paged_kv {
 
 PagedKVCache::PagedKVCache(int nLayers, int nKvHeads, int dHead, int numBlocks, int blockSize) : nLayers_(nLayers), nKvHeads_(nKvHeads), dHead_(dHead), numBlocks_(numBlocks), blockSize_(blockSize) {
     kPool_.resize(nLayers_);
@@ -91,4 +91,4 @@ void PagedKVCache::gather(int layer, const BlockTable& table, int numTokens, flo
     });
 }
 
-} // namespace attn
+} // namespace paged_kv

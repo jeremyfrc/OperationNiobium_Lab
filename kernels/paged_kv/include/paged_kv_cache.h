@@ -3,7 +3,7 @@
 #include "block.h"
 #include "block_table.h"
 
-namespace attn {
+namespace paged_kv {
 
 class PagedKVCache {
     public:
@@ -42,4 +42,4 @@ class PagedKVCache {
         int blockSize_;
 };
 
-} // namespace attn
+} // namespace paged_kv
