@@ -1,7 +1,7 @@
 // Stage C 验收: paged 路径 vs Phase 2 连续 KV 路径, 逐步对拍。
 //
 // 覆盖验收判据:
-//   [1] prompt=3 + 20 步 decode, 两条路径 logits 逐步 check_close(rtol=1e-5)
+//   [1] prompt=3 + 22 步 decode, 两条路径 logits 逐步 check_close(rtol=1e-5)
 //   [2] greedy 采出的 token id 序列完全相同
 //   [3] 块用量 == ceil(23 / block_size), 一块不多
 //   [4] 序列结束后释放, num_free() 回到初值
@@ -70,7 +70,7 @@ static std::vector<int> run_stepwise_match(const TransformerConfig& cfg,
   seq.push_back(next);
 
   // ---- decode: 每步 1 个 token ----
-  for (int t = 1; t < steps; ++t) {
+  for (int t = 1; t <= steps; ++t) {
     int pos = (int)seq.size() - 1;
     std::vector<int> one = { seq.back() };
 
@@ -125,7 +125,7 @@ static std::vector<int> run_stepwise_match(const TransformerConfig& cfg,
 // ---------------------------------------------------------------------
 static void test_oom_graceful(const TransformerConfig& cfg, const TransformerWeights& w) {
   std::vector<int> prompt = {1, 5, 42};
-  const int steps = 20;
+  const int steps = 22;
 
   // 故意只给 1 块 (block_size=4 -> 只装 4 token), 远不够 23
   paged_kv::BlockAllocator alloc(/*num_blocks=*/1, kBlockSize);
@@ -141,7 +141,7 @@ static void test_oom_graceful(const TransformerConfig& cfg, const TransformerWei
   } else {
     int next = argmax(pref.data() + ((int)prompt.size() - 1) * cfg.vocab_size, cfg.vocab_size);
     seq.push_back(next);
-    for (int t = 1; t < steps; ++t) {
+    for (int t = 1; t <= steps; ++t) {
       std::vector<int> one = { seq.back() };
       Tensor l({1, cfg.vocab_size});
       // t 到达容量上限后会 false
@@ -158,15 +158,40 @@ static void test_oom_graceful(const TransformerConfig& cfg, const TransformerWei
   CHECK(alloc.num_free() >= 0);
 }
 
+// ---------------------------------------------------------------------
+// [6] 故意喂错误的 pos_offset: table.num_tokens() != pos_offset -> NB_CHECK 抛异常
+// ---------------------------------------------------------------------
+static void test_bad_pos_offset(const TransformerConfig& cfg, const TransformerWeights& w) {
+  paged_kv::BlockAllocator alloc(kNumBlocks, kBlockSize);
+  paged_kv::BlockTable table(&alloc);
+  paged_kv::PagedKVCache cache(cfg.n_layers, cfg.n_kv_heads, cfg.d_head, kNumBlocks, kBlockSize);
+
+  // 先正常 prefill 3 个 (num_tokens = 3)
+  Tensor pref({3, cfg.vocab_size});
+  CHECK(forward_paged({1, 5, 42}, w, cfg, pref, cache, table, 0));
+  CHECK(table.num_tokens() == 3);
+
+  // 现在故意传 pos_offset = 2 (或 5), 与 num_tokens=3 不符 -> 应抛异常
+  Tensor bad({1, cfg.vocab_size});
+  bool threw = false;
+  try {
+    forward_paged({7}, w, cfg, bad, cache, table, /*pos_offset=*/2);
+  } catch (const std::exception& e) {
+    threw = true;
+    std::printf("[bad pos_offset] caught: %s\n", e.what());
+  }
+  CHECK(threw);   // 必须被抓
+}
+
 int main() {
   TransformerConfig cfg = get_tiny_config();
   TransformerWeights w = load_tiny_weights(cfg);
 
   std::vector<int> prompt = {1, 5, 42};
-  const int steps = 20;
+  const int steps = 22;
   (void)steps;
 
-  std::printf("=== Stage C: paged vs contiguous (prompt=3 + 20 decode) ===\n");
+  std::printf("=== Stage C: paged vs contiguous (prompt=3 + 22 decode) ===\n");
   std::vector<int> seq = run_stepwise_match(cfg, w, prompt, steps, "main");
 
   std::printf("greedy seq: ");
@@ -174,6 +199,7 @@ int main() {
   std::printf("\n");
 
   test_oom_graceful(cfg, w);
+  test_bad_pos_offset(cfg, w); 
 
   if (g_failed == 0) {
     std::printf("test_paged_vs_contiguous: ALL PASSED\n");

@@ -1,4 +1,5 @@
 #include "transformer.h"
+#include "check.h"
 #include "attention_paged.h"
 #include "rmsnorm.h"
 #include "attention.h"
@@ -57,6 +58,8 @@ bool forward_paged(const std::vector<int>& token_ids, const TransformerWeights& 
     std::copy(x.data(), x.data() + x.numel(), buf_a.data());
     Tensor* in = &buf_a;
     Tensor* outp = &buf_b;
+
+    NB_CHECK(pos_offset == table.num_tokens(), "forward_paged(): table token number and position offset mismatch!");
 
     if (!paged_kv::prepare_sequence(table, seq_len)) return false;
     
