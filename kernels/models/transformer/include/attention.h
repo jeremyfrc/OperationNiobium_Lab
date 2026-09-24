@@ -16,3 +16,5 @@ struct AttentionWeights{
 void attention_forward(const Tensor& x, const AttentionWeights& w, const TransformerConfig& cfg,Tensor& out);
 
 void attention_forward_kv(const Tensor& x, const AttentionWeights& w, const TransformerConfig& cfg, Tensor& out, KVCache& kv_cache, int layer_idx, int pos_offset);
+
+void attention_over_kv(const Tensor& qRoped, const float* kc, const float* vc, Tensor& ctx, const TransformerConfig& cfg, int seq_len, int pos_offset, int total_ctx);

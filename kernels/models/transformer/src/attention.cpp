@@ -157,35 +157,43 @@ void attention_forward_kv(const Tensor& x, const AttentionWeights& w, const Tran
     }
 
     // 4. 这段新的输入一共会和 [0, pos_offset+seq_len) 的历史 token 做注意力
-    int total_ctx = pos_offset + seq_len;
+    // 5. softmax 沿最后一维 (total_ctx)
+    // 6. context = scores @ V，V 也从 cache 读
+    Tensor ctx({seq_len, n_heads * d_head});
+    attention_over_kv(q_linear, kc, vc, ctx, cfg, seq_len, pos_offset, pos_offset + seq_len);
+
+    // 7. 若 seq_len>1（prefill）要 reshape 后 matmul；decode 时直接 matmul
+    matmul(ctx, w.wO, out);
+}
+
+void attention_over_kv(const Tensor& qRoped, const float* kc, const float* vc, Tensor& ctx, const TransformerConfig& cfg, int seq_len, int pos_offset, int total_ctx) {
+    const int n_heads = cfg.n_heads, n_kv_heads = cfg.n_kv_heads, d_head = cfg.d_head;
+    const int kv_group = n_heads / n_kv_heads;
+    const int kv_stride = n_kv_heads * d_head;
 
     Tensor scores({n_heads, seq_len, total_ctx});
-    float scale = 1.0f / std::sqrt((float)d_head);
+    const float scale = 1.f / std::sqrt((float)d_head);
 
-    for (int h = 0; h < n_heads; ++h){
-        int kv_h = h / kv_group_size;
-        for (int i = 0; i < seq_len; ++i){
+    for (int h = 0; h < n_heads; ++h) {
+        int kv_h = h / kv_group;
+        for (int i = 0; i < seq_len; ++i) {
             int abs_i = pos_offset + i;
-            float* srow = scores.data() + (h * seq_len + i) * total_ctx;  // hoist
+            float* srow = scores.data() + (h * seq_len + i) * total_ctx;
             for (int j = 0; j < total_ctx; ++j) {
-                if (j > abs_i) { srow[j] = -1e9f; continue;}
+                if (j>abs_i) { srow[j] = -1e9f; continue;}
                 float sum = 0;
-                for (int d = 0; d < d_head; ++d) {
-                    float qv = q_linear.data()[head_flat(i, h, d, n_heads, d_head)];
-                    sum += qv * kc[j * kv_stride + kv_h * d_head + d];
+                for (int d = 0; d < d_head; ++d){
+                    sum += qRoped.data()[head_flat(i, h, d, n_heads, d_head)] * kc[j * kv_stride + kv_h * d_head + d];
                 }
                 srow[j] = sum * scale;
             }
         }
     }
 
-    // 5. softmax 沿最后一维 (total_ctx)
     softmax_inplace(scores);
 
-    // 6. context = scores @ V，V 也从 cache 读
-    Tensor ctx({seq_len, n_heads * d_head});
     for (int h = 0; h < n_heads; ++h) {
-        int kv_h = h / kv_group_size;
+        int kv_h = h / kv_group;
         for (int i = 0; i < seq_len; ++i) {
             int abs_i = pos_offset + i;
             float* srow = scores.data() + (h * seq_len + i) * total_ctx;
@@ -198,7 +206,4 @@ void attention_forward_kv(const Tensor& x, const AttentionWeights& w, const Tran
             }
         }
     }
-
-    // 7. 若 seq_len>1（prefill）要 reshape 后 matmul；decode 时直接 matmul
-    matmul(ctx, w.wO, out);
 }
