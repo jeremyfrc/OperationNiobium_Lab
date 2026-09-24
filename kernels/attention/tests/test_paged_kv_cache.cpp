@@ -4,6 +4,9 @@
 //   2. 跨块边界正确: 第 4/第 5 个 token 分属不同块, 值不串
 //   3. 两个 BlockTable 用同一 allocator 交错分配, 各自 gather 互不污染
 //   4. write / gather 越界 -> NB_CHECK 抛 std::runtime_error 拦下
+//   5. write 的契约是"已分配容量"(capacity_tokens), 而非"已提交长度"(num_tokens):
+//      - 写"已分配但未 append"的区 -> 合法 (append_kv 依赖此行为)
+//      - 超出已分配容量 -> 抛
 #include "block_allocator.h"
 #include "block_table.h"
 #include "paged_kv_cache.h"
@@ -15,10 +18,10 @@
 
 using namespace attn;
 
+static int g_failed = 0;
 #include <sys/wait.h>
 #include <unistd.h>
 
-static int g_failed = 0;
 #define CHECK(cond)                                                       \
   do {                                                                    \
     if (!(cond)) {                                                        \
@@ -153,7 +156,6 @@ static void test_write_out_of_range() {
   PagedKVCache cache(kNLayers, kNKvHeads, kDHead, kNumBlk, kBlockSz);
   table.ensure_capacity(kBlockSz);
   table.append_tokens(kBlockSz);   // num_tokens=4
-
   std::vector<float> kSrc((size_t)8 * kTokElems, 1.f);
   std::vector<float> vSrc((size_t)8 * kTokElems, 1.f);
 
@@ -173,12 +175,69 @@ static void test_gather_out_of_range() {
   PagedKVCache cache(kNLayers, kNKvHeads, kDHead, kNumBlk, kBlockSz);
   table.ensure_capacity(kBlockSz);
   table.append_tokens(kBlockSz);   // num_tokens=4
-
   std::vector<float> kDst((size_t)8 * kTokElems), vDst((size_t)8 * kTokElems);
 
   bool threw = false;
   try {
     cache.gather(0, table, 8, kDst.data(), vDst.data());     // 8 > 4: 越界
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  CHECK(threw);
+}
+
+// ---- 验收5a: write 到"已分配但未提交"的区 -> 合法 (append_kv 依赖此语义) ----
+// 关键: 这里 startPos=4, n=4, 但 num_tokens 仍为 4 (只提交了前半)。
+// 旧契约(num_tokens) 会误判越界; 新契约(capacity_tokens=8) 应放行。
+static void test_write_into_allocated_uncommitted() {
+  BlockAllocator alloc(kNumBlk, kBlockSz);
+  BlockTable table(&alloc);
+  PagedKVCache cache(kNLayers, kNKvHeads, kDHead, kNumBlk, kBlockSz);
+
+  CHECK(table.ensure_capacity(2 * kBlockSz));   // 2 块 -> 容量 8
+  table.append_tokens(kBlockSz);                // 只提交 4 -> num_tokens=4
+
+  std::vector<float> kSrc, vSrc;
+  make_src(kSrc, true,  0, 4, kBlockSz);   // token 4..7 的数据
+  make_src(vSrc, false, 0, 4, kBlockSz);
+
+  bool threw = false;
+  try {
+    cache.write(0, table, /*startPos=*/4, kSrc.data(), vSrc.data(), kBlockSz);  // [4,8) 已分配, 合法
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  CHECK(!threw);   // 不应抛
+
+  // 提交后再 gather 全部 8 个, 前 4 个是 0(没写过), 后 4 个应是刚写的
+  table.append_tokens(kBlockSz);   // num_tokens = 8
+  std::vector<float> kOut((size_t)8 * kTokElems, -1.f), vOut((size_t)8 * kTokElems, -1.f);
+  cache.gather(0, table, 8, kOut.data(), vOut.data());
+  // 前 4 个 token 从没写过 -> 池初始化为 0
+  for (int e = 0; e < 4 * kTokElems; ++e) {
+    CHECK(kOut[e] == 0.f);
+    CHECK(vOut[e] == 0.f);
+  }
+  // 后 4 个 token = 刚写进 [4,8) 的数据
+  CHECK(std::memcmp(kOut.data() + 4 * kTokElems, kSrc.data(), kSrc.size() * sizeof(float)) == 0);
+  CHECK(std::memcmp(vOut.data() + 4 * kTokElems, vSrc.data(), vSrc.size() * sizeof(float)) == 0);
+}
+
+// ---- 验收5b: 超出"已分配容量" -> 抛 (新契约真正拦的点) ----
+static void test_write_beyond_capacity() {
+  BlockAllocator alloc(kNumBlk, kBlockSz);
+  BlockTable table(&alloc);
+  PagedKVCache cache(kNLayers, kNKvHeads, kDHead, kNumBlk, kBlockSz);
+
+  CHECK(table.ensure_capacity(kBlockSz));   // 容量 4
+  // 不 append: num_tokens=0, capacity=4
+
+  std::vector<float> kSrc((size_t)8 * kTokElems, 1.f);
+  std::vector<float> vSrc((size_t)8 * kTokElems, 1.f);
+
+  bool threw = false;
+  try {
+    cache.write(0, table, 0, kSrc.data(), vSrc.data(), 8);   // 8 > 容量 4 -> 抛
   } catch (const std::runtime_error&) {
     threw = true;
   }
@@ -191,6 +250,8 @@ int main() {
   test_interleaved_two_tables();
   test_write_out_of_range();
   test_gather_out_of_range();
+  test_write_into_allocated_uncommitted();
+  test_write_beyond_capacity();
 
   if (g_failed == 0) {
     std::printf("test_paged_kv_cache: ALL PASSED\n");

@@ -50,6 +50,8 @@ class BlockTable {
   int num_blocks() const { return static_cast<int>(blocks_.size()); }
   const std::vector<BlockId>& blocks() const { return blocks_; }
 
+  int capacity_tokens() const { return static_cast<int>(blocks_.size()) * block_size(); }
+
  private:
   BlockAllocator* alloc_;
   int numTokens_ = 0;

@@ -59,7 +59,7 @@ float* PagedKVCache::v_block(int layer, BlockId b) {
 
 void PagedKVCache::write(int layer, const BlockTable& table, int startPos, const float* kSrc, const float* vSrc, int nTokens) {
     
-    NB_CHECK(startPos >= 0 && nTokens >= 0 && startPos + nTokens <= table.num_tokens(), "write(): starting / n_tokens out of boundary!");
+    NB_CHECK(startPos >= 0 && nTokens >= 0 && startPos + nTokens <= table.capacity_tokens(), "write(): starting / n_tokens beyong allocated capacity!");
     NB_CHECK(layer >= 0 && layer < nLayers_, "write(): layer out of range!");
 
     const int tokElems = token_elems();

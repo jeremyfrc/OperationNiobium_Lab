@@ -30,6 +30,8 @@ BlockTable::~BlockTable() {
     for (BlockId id: blocks_) alloc_->decref(id);
 }
 
+int BlockTable::block_size() const { return alloc_->block_size(); }
+
 bool BlockTable::ensure_capacity(int numTokens) {
 
     const int blockSize = alloc_->block_size();

@@ -12,7 +12,7 @@ class PagedKVCache {
         PagedKVCache(int nLayers, int nKvHeads, int dHead, int numBlocks, int blockSize);
 
         // 把逻辑位置 [start_pos, start_pos+n_tokens) 的 K/V 写进 table 指向的块。
-        // 前置: start_pos+n_tokens <= table.num_tokens()  (越界 NB_CHECK)
+        // 前置: start_pos+n_tokens <= table.capacity_tokens()  (写"已分配区"; 越界 NB_CHECK)
         void write(int layer, const BlockTable& table, int startPos, const float* kSrc, const float* vSrc, int nTokens);
 
         // 把逻辑位置 [0, num_tokens) 收集成连续缓冲。
