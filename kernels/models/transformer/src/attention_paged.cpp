@@ -33,8 +33,7 @@ bool attention_paged_forward(const Tensor& x, const AttentionWeights& w, const T
     k_linear.reshape({seq_len, n_kv_heads * d_head});
 
 
-    if (!paged_kv::append_kv(cache, table, layer_idx, k_linear.data(), v_linear.data(), seq_len))
-        return false;
+    cache.write(layer_idx, table, pos_offset, k_linear.data(), v_linear.data(), seq_len);
 
     int total_ctx = pos_offset + seq_len;
     std::vector<float> k_buf((size_t)total_ctx * n_kv_heads * d_head);

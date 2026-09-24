@@ -3,16 +3,14 @@
 
 namespace paged_kv {
 
-bool append_kv(PagedKVCache& cache, BlockTable& table, int layer, const float* kNew, const float* vNew, int nNew) {
+bool prepare_sequence(BlockTable& table, int n) {
+    NB_CHECK(n >= 0, "prepare_sequence(): n must be >= 0.");
+    if (n == 0) return true;
 
-    NB_CHECK(nNew >= 0, "append_kv(): new token number must be >= 0.");
-    if (nNew == 0) return true;
-
-    const int start = table.num_tokens(); 
-    if (!table.ensure_capacity(start + nNew)) return false;
-
-    cache.write(layer, table, start, kNew, vNew, nNew);
-    table.append_tokens(nNew);
+    const int start = table.num_tokens();          // 推进前
+    if (!table.ensure_capacity(start + n)) return false;
+    table.append_tokens(n);                         // 提交逻辑长度
     return true;
 }
-}
+
+}  // namespace paged_kv

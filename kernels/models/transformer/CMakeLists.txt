@@ -26,12 +26,14 @@ target_include_directories(transformer_forward PUBLIC
 # ===== 集成层: paged attention 入口 + 对拍测试 (只有这里依赖 paged_kv) =====
 add_library(transformer_paged
     src/attention_paged.cpp
+    src/forward_paged.cpp
 )
 
 target_link_libraries(transformer_paged
     PUBLIC transformer_forward
     PUBLIC paged_kv_blocks
 )
+
 target_include_directories(transformer_paged PUBLIC include)   # 已由 transformer_forward 带; 保险
 
 # ==============================================================================
@@ -71,6 +73,10 @@ target_link_libraries(test_generate_kv PRIVATE transformer_forward)
 add_executable(benchmark tests/benchmark.cpp)
 target_link_libraries(benchmark PRIVATE transformer_forward)
 
+# Lab1 Stage C: paged 路径 vs 连续 KV 路径, 逐步对拍
+add_executable(test_paged_vs_contiguous tests/test_paged_vs_contiguous.cpp)
+target_link_libraries(test_paged_vs_contiguous PRIVATE transformer_paged)
+
 enable_testing()
 
 add_test(NAME test_rmsnorm        COMMAND test_rmsnorm)
@@ -82,6 +88,7 @@ add_test(NAME test_full_forward   COMMAND test_full_forward)
 add_test(NAME test_generate       COMMAND test_generate)
 add_test(NAME test_generate_kv    COMMAND test_generate_kv)
 add_test(NAME benchmark           COMMAND benchmark)
+add_test(NAME test_paged_vs_contiguous COMMAND test_paged_vs_contiguous)
 
 # 这些测试用相对路径 "tests/ref/data/*.bin" 读参考数据, 工作目录必须设为
 # 源码根(transformer/), 否则 ctest 默认在 build/ 下找不到数据文件。
@@ -94,7 +101,8 @@ set(TSFM_TESTS
     test_full_forward
     test_generate
     test_generate_kv
-    benchmark)
+    benchmark
+    test_paged_vs_contiguous)
 
 set_tests_properties(${TSFM_TESTS} PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
