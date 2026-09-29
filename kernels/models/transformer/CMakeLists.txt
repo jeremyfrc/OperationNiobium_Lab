@@ -69,9 +69,9 @@ target_link_libraries(test_generate PRIVATE transformer_forward)
 add_executable(test_generate_kv tests/test_generate_kv.cpp)
 target_link_libraries(test_generate_kv PRIVATE transformer_forward)
 
-# Stage 5 性能benchmark
+# Stage 5 性能benchmark (含 paged 一列 -> 需链 transformer_paged)
 add_executable(benchmark tests/benchmark.cpp)
-target_link_libraries(benchmark PRIVATE transformer_forward)
+target_link_libraries(benchmark PRIVATE transformer_paged)
 
 # Lab1 Stage C: paged 路径 vs 连续 KV 路径, 逐步对拍
 add_executable(test_paged_vs_contiguous tests/test_paged_vs_contiguous.cpp)
