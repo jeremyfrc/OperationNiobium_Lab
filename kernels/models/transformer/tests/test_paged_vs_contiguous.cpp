@@ -3,7 +3,7 @@
 // 覆盖验收判据:
 //   [1] prompt=3 + 22 步 decode, 两条路径 logits 逐步 check_close(rtol=1e-5)
 //   [2] greedy 采出的 token id 序列完全相同
-//   [3] 块用量 == ceil(23 / block_size), 一块不多
+//   [3] 块用量 == ceil(25 / block_size), 一块不多
 //   [4] 序列结束后释放, num_free() 回到初值
 //   [5] 中途 allocate 失败(num_blocks 调到刚好不够) -> 优雅返回 false, 不崩
 #include "transformer.h"
@@ -30,7 +30,7 @@ static int g_failed = 0;
   } while (0)
 
 static const int kBlockSize = 4;
-static const int kNumBlocks = 8;   // 够 ceil(23/4)=6 块
+static const int kNumBlocks = 8;   // 够 ceil(25/4)=7 块
 
 // ---------------------------------------------------------------------
 // 主链路对拍: prefill + 逐步 decode, 返回 greedy 序列
@@ -127,7 +127,7 @@ static void test_oom_graceful(const TransformerConfig& cfg, const TransformerWei
   std::vector<int> prompt = {1, 5, 42};
   const int steps = 22;
 
-  // 故意只给 1 块 (block_size=4 -> 只装 4 token), 远不够 23
+  // 故意只给 1 块 (block_size=4 -> 只装 4 token), 远不够 25
   paged_kv::BlockAllocator alloc(/*num_blocks=*/1, kBlockSize);
   paged_kv::BlockTable table(&alloc);
   paged_kv::PagedKVCache cache(cfg.n_layers, cfg.n_kv_heads, cfg.d_head, /*num_blocks=*/1, kBlockSize);
@@ -153,9 +153,20 @@ static void test_oom_graceful(const TransformerConfig& cfg, const TransformerWei
     }
   }
   CHECK(saw_false);   // 必须优雅返回 false, 而不是崩/越界
+  CHECK(alloc.check_invariant());  // OOM 后记账没坏
 
-  // allocator 未被破坏: 仍能正常分配
-  CHECK(alloc.num_free() >= 0);
+  {
+    paged_kv::BlockTable t3(&alloc);
+    // 池子只有 1 块且已占用 -> 再要 1 块应失败(返回 false), 而不是崩
+    bool got = t3.ensure_capacity(kBlockSize);   // 要 1 块
+    // 无论拿到与否, 记账都不许坏
+    CHECK(alloc.check_invariant());
+    // 因为 num_blocks=1 已满 -> got 应为 false
+    if (got) std::fprintf(stderr, "[OOM] 意外: 满了还能分到块\n");
+    CHECK(!got);                    // 应拿不到
+  }                                 // t3 析构 -> 归还(若有)
+  CHECK(alloc.check_invariant());   // 归还后仍干净
+  CHECK((int)table.blocks().size() == 1);   // 原表未受影响
 }
 
 // ---------------------------------------------------------------------

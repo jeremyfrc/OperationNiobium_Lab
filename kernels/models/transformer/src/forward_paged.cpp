@@ -5,14 +5,12 @@
 #include "attention.h"
 #include "swiglu.h"
 #include "ops.h"
-#include <limits>
-#include <vector>
-#include <cassert>
-#include <algorithm>
 #include "utils.h"
+#include <vector>
+#include <algorithm>
 
 
-bool decode_layer_forward_paged(const Tensor& x, const DecoderLayerWeights& w, const TransformerConfig& cfg, Tensor& out, paged_kv::PagedKVCache& cache, paged_kv::BlockTable& table, int layer_idx, int pos_offset) {
+void decode_layer_forward_paged(const Tensor& x, const DecoderLayerWeights& w, const TransformerConfig& cfg, Tensor& out, paged_kv::PagedKVCache& cache, paged_kv::BlockTable& table, int layer_idx, int pos_offset) {
     int seq_len = x.shape()[0];
     int d_model = cfg.d_model;
 
@@ -22,7 +20,7 @@ bool decode_layer_forward_paged(const Tensor& x, const DecoderLayerWeights& w, c
 
     // 2. paged attention
     Tensor attn_out({seq_len, d_model});
-    if (!attention_paged_forward(x_norm1, w.attn, cfg, attn_out, cache, table, layer_idx, pos_offset)) return false;
+    attention_paged_forward(x_norm1, w.attn, cfg, attn_out, cache, table, layer_idx, pos_offset);
 
     // 3. 残差1
     std::copy(x.data(), x.data()+x.numel(), out.data());
@@ -38,8 +36,6 @@ bool decode_layer_forward_paged(const Tensor& x, const DecoderLayerWeights& w, c
     
     // 6. 残差2
     add_inplace(out, ffn_out);
-
-    return true;
 }
 
 bool forward_paged(const std::vector<int>& token_ids, const TransformerWeights& w, const TransformerConfig& cfg, Tensor& logits, paged_kv::PagedKVCache& cache, paged_kv::BlockTable& table, int pos_offset) {
@@ -64,7 +60,7 @@ bool forward_paged(const std::vector<int>& token_ids, const TransformerWeights& 
     if (!paged_kv::prepare_sequence(table, seq_len)) return false;
     
     for (int l = 0; l < cfg.n_layers; ++l) {
-        if (!decode_layer_forward_paged(*in, w.layers[l], cfg, *outp, cache, table, l, pos_offset)) return false;
+        decode_layer_forward_paged(*in, w.layers[l], cfg, *outp, cache, table, l, pos_offset);
         std::swap(in, outp);
     }
 

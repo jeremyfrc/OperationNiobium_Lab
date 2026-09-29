@@ -33,9 +33,6 @@ class BlockAllocator {
   // 用尽时返回 kInvalidBlock（不抛不崩）。
   BlockId allocate();
 
-  // 把 block_id 归还回 free_list_（断言：id 合法）。
-  void free(BlockId id);
-
   int num_free() const { return static_cast<int>(freeList_.size()); }
   int num_blocks() const { return numBlocks_; }
   int block_size() const { return blockSize_; }
@@ -49,6 +46,7 @@ class BlockAllocator {
 
   // 记账不变式：num_free() + (refcount_ > 0 的块数) == num_blocks_。
   void assert_invariant() const;
+  bool check_invariant() const;
 
  private:
   int numBlocks_;

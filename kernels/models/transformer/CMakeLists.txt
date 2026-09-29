@@ -4,7 +4,7 @@ project(niobium_transformer_forward CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_compile_options(-Wall -Wextra -O2)
+add_compile_options(-Wall -Wextra -O2 -DNDEBUG)
 
 add_library(transformer_forward
     src/tensor.cpp

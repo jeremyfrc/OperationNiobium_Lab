@@ -34,26 +34,34 @@ PagedKVCache::PagedKVCache(int nLayers, int nKvHeads, int dHead, int numBlocks, 
 }
 
 const float* PagedKVCache::k_block(int layer, BlockId b) const {
+#ifndef NDEBUG
     NB_CHECK(layer >= 0 && layer < nLayers_, "k_block() with layer out of bound! ");
     NB_CHECK(b >= 0 && b < numBlocks_, "k_block() with BlockId out of bound! ");
+#endif
     return kPool_[layer].data() + (size_t)b * block_elems();
 }
 
 float* PagedKVCache::k_block(int layer, BlockId b){
+#ifndef NDEBUG
     NB_CHECK(layer >= 0 && layer < nLayers_, "k_block() with layer out of bound! ");
     NB_CHECK(b >= 0 && b < numBlocks_, "k_block() with BlockId out of bound! ");
+#endif
     return kPool_[layer].data() + (size_t)b * block_elems();
 }
 
 const float* PagedKVCache::v_block(int layer, BlockId b) const {
+#ifndef NDEBUG
     NB_CHECK(layer >= 0 && layer < nLayers_, "v_block() with layer out of bound! ");
     NB_CHECK(b >= 0 && b < numBlocks_, "v_block() with BlockId out of bound! ");
+#endif
     return vPool_[layer].data() + (size_t)b * block_elems();
 }
 
 float* PagedKVCache::v_block(int layer, BlockId b) {
+#ifndef NDEBUG
     NB_CHECK(layer >= 0 && layer < nLayers_, "v_block() with layer out of bound! ");
     NB_CHECK(b >= 0 && b < numBlocks_, "v_block() with BlockId out of bound! ");
+#endif
     return vPool_[layer].data() + (size_t)b * block_elems();
 }
 

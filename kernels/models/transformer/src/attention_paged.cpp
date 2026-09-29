@@ -5,7 +5,7 @@
 #include <cmath>
 #include <vector>
 
-bool attention_paged_forward(const Tensor& x, const AttentionWeights& w, const TransformerConfig& cfg, Tensor& out, paged_kv::PagedKVCache& cache, paged_kv::BlockTable& table, int layer_idx, int pos_offset) {
+void attention_paged_forward(const Tensor& x, const AttentionWeights& w, const TransformerConfig& cfg, Tensor& out, paged_kv::PagedKVCache& cache, paged_kv::BlockTable& table, int layer_idx, int pos_offset) {
     int seq_len = x.shape()[0];
     int d_model = cfg.d_model, n_heads = cfg.n_heads, n_kv_heads = cfg.n_kv_heads, d_head = cfg.d_head;
 
@@ -46,6 +46,5 @@ bool attention_paged_forward(const Tensor& x, const AttentionWeights& w, const T
 
     // 6. wO
     matmul(ctx, w.wO, out);
-    return true;
 
 }

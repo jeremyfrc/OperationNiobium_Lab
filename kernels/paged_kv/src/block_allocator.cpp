@@ -27,15 +27,6 @@ BlockId BlockAllocator::allocate() {
     return id;
 }
 
-void BlockAllocator::free(BlockId id) {
-
-    NB_CHECK(valid_id(id), "This id is invalid!");
-    NB_CHECK(refCount_[id] == 0, "We can't free a block being referenced!");
-    freeList_.push_back(id);
-    assert_invariant();
-    refCount_[id] = 0;
-}
-
 void BlockAllocator::incref(BlockId id) {
     
     NB_CHECK(valid_id(id), "This id is invalid!");
@@ -68,13 +59,35 @@ int BlockAllocator::refcount(BlockId id) const {
     return refCount_[id];
 }
 
-void BlockAllocator::assert_invariant() const {
-
+bool BlockAllocator::check_invariant() const {
+    // 1) 计数不变式 : num_free() + (#refcount > 0) == num_blocks
     int active = 0;
-    for (int c : refCount_) {
-        if (c > 0) ++active;
+    for (int c: refCount_) if (c > 0) ++active;
+    if (num_free() + active != numBlocks_) return false;
+
+    // 2) free list 无重复，且不与已分配块重叠(= 全集且互斥)
+    std::vector<char> seen(numBlocks_, 0);
+    for (BlockId id: freeList_) {
+        if (!valid_id(id)) return false;
+        if (seen[id]) return false;
+        if (refCount_[id] != 0) return false;
+        seen[id] = 1;
     }
-    NB_CHECK(num_free() + active == numBlocks_, "invariant broken.");
+    for (int id = 0; id < numBlocks_; ++id) {
+        if (refCount_[id] > 0) {
+            if (seen[id]) return false; // 已分配块不在 free list
+        } else {
+            // refcount == 0的块必须在free list
+            if (!seen[id]) return false;
+        }
+    }
+    return true;
+}
+
+void BlockAllocator::assert_invariant() const {
+#ifndef NDEBUG
+    NB_CHECK(check_invariant(), "allocator invariant broken.");
+#endif
 }
 
 int BlockAllocator::num_allocated() const {
