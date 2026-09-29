@@ -35,15 +35,12 @@ void attention_paged_forward(const Tensor& x, const AttentionWeights& w, const T
 
     cache.write(layer_idx, table, pos_offset, k_linear.data(), v_linear.data(), seq_len);
 
-    int total_ctx = pos_offset + seq_len;
-    std::vector<float> k_buf((size_t)total_ctx * n_kv_heads * d_head);
-    std::vector<float> v_buf((size_t)total_ctx * n_kv_heads * d_head);
-    cache.gather(layer_idx, table, total_ctx, k_buf.data(), v_buf.data());
+    const int total_ctx = pos_offset + seq_len;
+    cache.gather_into_scratch(layer_idx, table, total_ctx);   // 复用常驻 buffer
 
     // 5. attention 数学
     Tensor ctx({seq_len, n_heads * d_head});
-    attention_over_kv(q_linear, k_buf.data(), v_buf.data(), ctx, cfg, seq_len, pos_offset, total_ctx);
-
+    attention_over_kv(q_linear, cache.k_scratch(), cache.v_scratch(), ctx, cfg, seq_len, pos_offset, total_ctx);
     // 6. wO
     matmul(ctx, w.wO, out);
 

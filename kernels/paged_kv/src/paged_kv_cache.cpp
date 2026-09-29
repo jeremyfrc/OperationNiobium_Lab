@@ -33,6 +33,21 @@ PagedKVCache::PagedKVCache(int nLayers, int nKvHeads, int dHead, int numBlocks, 
     }
 }
 
+void PagedKVCache::gather_into_scratch(int layer, const BlockTable& table, int numTokens) {
+    NB_CHECK(layer >= 0 && layer < nLayers_, "gather_into_scratch(): layer out of boundary!");
+    NB_CHECK(numTokens >= 0 && numTokens <= table.num_tokens(), "gather_into_scratch(): numTokens out of range!");
+
+    const size_t need = (size_t)numTokens * token_elems();
+    // 只增长: resize 到 >= need 的现有容量, 不 shrink (capacity 复用)
+    if (k_scratch_.size() < need) {
+        k_scratch_.resize(need);
+        v_scratch_.resize(need);
+    }
+    // 注意: 这里只保证 size >= need; 若上次更大, data() 仍是那一段,
+    // gather 只写 [0, need), 读方也只读 [0, need)。
+    gather(layer, table, numTokens, k_scratch_.data(), v_scratch_.data());
+}
+
 const float* PagedKVCache::k_block(int layer, BlockId b) const {
 #ifndef NDEBUG
     NB_CHECK(layer >= 0 && layer < nLayers_, "k_block() with layer out of bound! ");

@@ -24,6 +24,12 @@ class PagedKVCache {
         const float* k_block(int layer, BlockId b) const;
         float* v_block(int layer, BlockId b);
         const float* v_block(int layer, BlockId b) const;
+        
+        // 常驻 gather 缓冲 (避免每层每步 malloc + 零初始化)。
+        // 大小 = max_context * n_kv_heads * d_head; 由 prepare 时 resize(不 shrink)。
+        void gather_into_scratch(int layer, const BlockTable& table, int numTokens);
+        const float* k_scratch() const { return k_scratch_.data(); }
+        const float* v_scratch() const { return v_scratch_.data(); }
     
     private:
         // 每块的元素数 = block_size * n_kv_heads * d_head
@@ -34,7 +40,7 @@ class PagedKVCache {
 
         // [n_layers][num_blocks*block_elems()]
         std::vector<std::vector<float>> kPool_, vPool_;
-
+        std::vector<float> k_scratch_, v_scratch_;   // 常驻 gather 缓冲
         int nLayers_;
         int nKvHeads_;
         int dHead_;

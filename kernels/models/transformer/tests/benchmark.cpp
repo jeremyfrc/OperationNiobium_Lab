@@ -10,26 +10,6 @@
 #include <algorithm>
 
 
-// 测量一次生成耗时（毫秒）
-static double time_generate(bool use_kv,
-                            const std::vector<int>& prompt,
-                            const TransformerWeights& weights,
-                            const TransformerConfig& cfg,
-                            int new_tokens,
-                            std::vector<int>& out_ids)
-{
-    auto start = std::chrono::high_resolution_clock::now();
-
-    if (use_kv) {
-        out_ids = generate_kv(prompt, weights, cfg, new_tokens);
-    } else {
-        out_ids = generate(prompt, weights, cfg, new_tokens);
-    }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    return std::chrono::duration<double, std::milli>(end - start).count();
-}
-
 static std::vector<int> generate_paged(const std::vector<int>& prompt,
                                        const TransformerWeights& w,
                                        const TransformerConfig& cfg,
@@ -52,73 +32,101 @@ static std::vector<int> generate_paged(const std::vector<int>& prompt,
   return ids;
 }
 
+static std::vector<int> generate_kv_into(const std::vector<int>& prompt,
+                                         const TransformerWeights& w,
+                                         const TransformerConfig& cfg,
+                                         int new_tokens,
+                                         KVCache& cache) {
+  std::vector<int> ids = prompt;
+  int pos = 0;
+  Tensor pref({(int)prompt.size(), cfg.vocab_size});
+  transformer_forward_kv(prompt, w, cfg, pref, cache, pos);
+  pos += (int)prompt.size();
+  int next = argmax(pref.data() + (prompt.size() - 1) * cfg.vocab_size, cfg.vocab_size);
+  ids.push_back(next);
+  for (int i = 0; i < new_tokens - 1; ++i) {
+    std::vector<int> one = {next};
+    Tensor l({1, cfg.vocab_size});
+    transformer_forward_kv(one, w, cfg, l, cache, pos);
+    pos += 1;
+    next = argmax(l.data(), cfg.vocab_size);
+    ids.push_back(next);
+  }
+  return ids;
+}
+
+
 int main() {
     TransformerConfig cfg = get_tiny_config();
     TransformerWeights weights = load_tiny_weights(cfg);
 
     std::vector<int> prompt = {1, 5, 42};
-    int new_tokens = 20;
-    const int kRuns = 20;
+    const int kRuns = 100;
+    const int kNumBlocks = 128, kBlockSize = 4;   // 512 token 容量
 
-    // ---- Non-KV: warmup + median (与非 KV 公平) ----
-    std::vector<int> ids_nokv;
-    generate(prompt, weights, cfg, new_tokens);            // warmup
-    std::vector<double> t_nokv;
-    for (int r = 0; r < kRuns; ++r)
-        t_nokv.push_back(time_generate(false, prompt, weights, cfg, new_tokens, ids_nokv));
-    std::sort(t_nokv.begin(), t_nokv.end());
-    double ms_nokv = t_nokv[t_nokv.size() / 2];
-
-    // ---- KV: warmup + median ----
-    generate_kv(prompt, weights, cfg, new_tokens);         // warmup
-    std::vector<double> t_kv;
-    std::vector<int> ids_kv;
-    for (int r = 0; r < kRuns; ++r)
-        t_kv.push_back(time_generate(true, prompt, weights, cfg, new_tokens, ids_kv));
-    std::sort(t_kv.begin(), t_kv.end());
-    double ms_kv = t_kv[t_kv.size() / 2];
-
-    // ---- Paged: 每次重建 allocator/table/cache, warmup + median ----
-    auto run_paged_once = [&](std::vector<int>& out) -> double {
-        paged_kv::BlockAllocator alloc(/*num_blocks=*/64, /*block_size=*/4);
-        paged_kv::BlockTable table(&alloc);
-        paged_kv::PagedKVCache cache(cfg.n_layers, cfg.n_kv_heads, cfg.d_head, 64, 4);
-        auto start = std::chrono::high_resolution_clock::now();
-        out = generate_paged(prompt, weights, cfg, new_tokens, cache, table);
-        auto end = std::chrono::high_resolution_clock::now();
-        return std::chrono::duration<double, std::milli>(end - start).count();
+    // 返回 min / median / IQR (min 最能反映"纯计算", 抖动多为 malloc/调度叠加)
+    auto stats = [](std::vector<double> v, double& mn, double& med, double& iqr) {
+        std::sort(v.begin(), v.end());
+        mn = v.front();
+        med = v[v.size() / 2];
+        iqr = v[(v.size() * 3) / 4] - v[v.size() / 4];
     };
-    std::vector<int> ids_paged;
-    run_paged_once(ids_paged);                              // warmup
-    std::vector<double> t_paged;
-    for (int r = 0; r < kRuns; ++r)
-        t_paged.push_back(run_paged_once(ids_paged));
-    std::sort(t_paged.begin(), t_paged.end());
-    double ms_paged = t_paged[t_paged.size() / 2];
 
-    // ---- 输出 ----
-    auto row = [&](const char* name, double ms) {
-        std::cout << name << " : " << ms << " ms  ("
-                  << (ms / new_tokens) << " ms/token, "
-                  << (1000.0 * new_tokens / ms) << " tok/s)\n";
-    };
-    std::cout << "===== Benchmark (new_tokens=" << new_tokens << ") =====\n";
-    row("Non-KV", ms_nokv);
-    row("KV    ", ms_kv);
-    row("Paged ", ms_paged);
+    std::cout << "===== Length sweep (prompt=3, env outside timer, runs="
+              << kRuns << ") =====\n";
+    std::cout << "new_tokens |  KV: min/med/IQR(us)        |  Paged: min/med/IQR(us)     | d-min(us) | d-med(us)\n";
+    std::cout << "-----------+------------------------------+------------------------------+-----------+----------\n";
 
-    std::cout << "Speedup (Non-KV / KV)    : " << (ms_nokv / ms_kv)    << "x\n";
-    std::cout << "Speedup (Non-KV / Paged) : " << (ms_nokv / ms_paged) << "x\n";
+    for (int nt : {20, 60, 120, 250}) {
+        const int capacity = (int)prompt.size() + nt;
+        std::vector<int> ids_kv, ids_pg;
+        std::vector<double> t_kv, t_pg;
 
-    // ---- 三路输出一致性 ----
-    auto same = [](const std::vector<int>& a, const std::vector<int>& b) {
-        if (a.size() != b.size()) return false;
-        for (size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) return false;
-        return true;
-    };
-    bool ok = same(ids_nokv, ids_kv) && same(ids_kv, ids_paged);
-    std::cout << (ok ? "✅ outputs identical (Non-KV == KV == Paged)\n"
-                     : "❌ outputs DIFFER!\n");
+        // ---- KV: KVCache 建在计时区外, 每次复用 ----
+        {
+            KVCache cache(cfg.n_layers, capacity, cfg.n_kv_heads, cfg.d_head);
+            generate_kv_into(prompt, weights, cfg, nt, cache);   // warmup
+            for (int r = 0; r < kRuns; ++r) {
+                // 复用同一个 cache: 每次重新 prefill 会覆盖 [0, ...), 数值一致
+                auto s = std::chrono::high_resolution_clock::now();
+                ids_kv = generate_kv_into(prompt, weights, cfg, nt, cache);
+                auto e = std::chrono::high_resolution_clock::now();
+                t_kv.push_back(std::chrono::duration<double, std::milli>(e - s).count());
+            }
+        }
 
+        // ---- Paged: allocator/table/cache 建在计时区外, 每次复用 ----
+        {
+            paged_kv::BlockAllocator alloc(kNumBlocks, kBlockSize);
+            paged_kv::BlockTable table(&alloc);
+            paged_kv::PagedKVCache cache(cfg.n_layers, cfg.n_kv_heads, cfg.d_head, kNumBlocks, kBlockSize);
+            generate_paged(prompt, weights, cfg, nt, cache, table);   // warmup
+            for (int r = 0; r < kRuns; ++r) {
+                // 复用: 每次重新 prefill。注意 table 会累积 -> 每次需清空
+                table = paged_kv::BlockTable(&alloc);
+                auto s = std::chrono::high_resolution_clock::now();
+                ids_pg = generate_paged(prompt, weights, cfg, nt, cache, table);
+                auto e = std::chrono::high_resolution_clock::now();
+                t_pg.push_back(std::chrono::duration<double, std::milli>(e - s).count());
+            }
+        }
+        double mn_kv, med_kv, iqr_kv, mn_pg, med_pg, iqr_pg;
+        stats(t_kv, mn_kv, med_kv, iqr_kv);
+        stats(t_pg, mn_pg, med_pg, iqr_pg);
+
+        // us 单位 (ms * 1000)
+        auto us = [](double ms) { return ms * 1000.0; };
+        std::cout << nt
+                  << "         | " << us(mn_kv) << "/" << us(med_kv) << "/" << us(iqr_kv)
+                  << " | " << us(mn_pg) << "/" << us(med_pg) << "/" << us(iqr_pg)
+                  << " | " << us(mn_pg - mn_kv)
+                  << " | " << us(med_pg - med_kv) << "\n";
+
+        bool same = (ids_kv.size() == ids_pg.size());
+        if (same)
+            for (size_t i = 0; i < ids_kv.size(); ++i)
+                if (ids_kv[i] != ids_pg[i]) { same = false; break; }
+        std::cout << (same ? "  ✅ identical\n" : "  ❌ DIFFER!\n");
+    }
     return 0;
 }

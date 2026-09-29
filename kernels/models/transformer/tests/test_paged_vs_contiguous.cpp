@@ -61,12 +61,13 @@ static std::vector<int> run_stepwise_match(const TransformerConfig& cfg,
   CHECK(forward_paged(prompt, w, cfg, pg_pref, cache, table, 0));
 
   {
-    int last = (int)prompt.size() - 1;
-    bool ok = check_close(pg_pref.data() + last * cfg.vocab_size,
-                          kv_pref.data() + last * cfg.vocab_size,
-                          cfg.vocab_size, /*rtol=*/1e-5f);
-    if (!ok) std::fprintf(stderr, "[%s] prefill 末位 logits 不匹配\n", tag);
-    CHECK(ok);
+    for (int r = 0; r < (int)prompt.size(); ++r) {
+      bool ok = check_close(pg_pref.data() + r * cfg.vocab_size,
+                            kv_pref.data() + r * cfg.vocab_size,
+                            cfg.vocab_size, /*rtol=*/1e-5f);
+      if (!ok) std::fprintf(stderr, "[%s] prefill 第 %d 行 logits 不匹配\n", tag, r);
+      CHECK(ok);
+    }
   }
 
   // 用连续路径的 argmax 取第一个新 token (两条路径吃同样的 token)

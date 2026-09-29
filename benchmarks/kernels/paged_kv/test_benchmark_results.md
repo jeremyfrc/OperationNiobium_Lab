@@ -227,3 +227,71 @@ Why it matters / Lab2:
   - Lab2's goal is to eliminate the materialized gather: run
     attention directly over the blocks (block-wise / online-softmax
     attention) so no full-history copy is ever needed.
+
+================================================================
+ BENCHMARK AFTER FIX
+================================================================
+13: Test command: /home/frc28/OperationNiobium_Lab/kernels/build/models/transformer/benchmark
+13: Working Directory: /home/frc28/OperationNiobium_Lab/kernels/models/transformer
+13: Test timeout computed to be: 10000000
+13: ===== Length sweep (prompt=3) =====
+13: new_tokens |  KV ms (IQR)      |  Paged ms (IQR)   | Paged-KV | ratio
+13: -----------+-------------------+-------------------+----------+------
+13: 20         | 0.096807 (0.004726) | 0.100073 (0.001329) | 0.003266 | 1.03374x
+13:   ✅ identical
+13: 60         | 0.44094 (0.011689) | 0.454759 (0.0098) | 0.013819 | 1.03134x
+13:   ✅ identical
+13: 120         | 1.43464 (0.021906) | 1.4737 (0.019455) | 0.039061 | 1.02723x
+13:   ✅ identical
+13: 250         | 5.20928 (0.023845) | 5.37565 (0.073482) | 0.166374 | 1.03194x
+13:   ✅ identical
+13/14 Test #13: benchmark ........................   Passed    0.31 sec
+
+================================================================
+ Length sweep (prompt=3, env OUTSIDE timer, runs=100)
+================================================================
+ new_tokens | KV  min/med/IQR (us)   | Paged min/med/IQR (us) | d-min | d-med
+ -----------+-----------------------+------------------------+-------+------
+ 20         |  94.31/ 95.60/ 2.29    |  96.76/ 98.41/ 5.31    |  2.45 |  2.82
+ 60         | 434.25/440.81/11.91    | 445.61/452.63/10.84    | 11.36 | 11.82
+ 120        |1409.20/1429.45/16.01   |1443.21/1463.15/13.69   | 34.01 | 33.70
+ 250        |5171.68/5219.34/64.53   |5335.21/5390.17/70.58   |163.53 |170.83
+
+ Method : each config, warmup then 100 timed runs; report min, median,
+          IQR. min and median agree closely -> the gap is real, not jitter.
+          allocator/table/cache built ONCE outside the timer (both paths);
+          paged table is reset (not timed) between runs.
+
+================================================================
+ NEW Analysis
+================================================================
+1) The paged penalty is the materialized gather, NOT malloc.
+   Earlier a 6.3% gap looked like gather cost; it was almost entirely
+   per-layer allocations of k_buf/v_buf inside attention_paged_forward
+   (84 allocs + zero-init per generate). After hoisting these into a
+   reusable scratch buffer in PagedKVCache, and aligning the timer,
+   the residual gap is the real gather.
+
+2) The gap grows super-linearly with context.
+   d-min: 2.45 -> 11.36 -> 34.01 -> 163.53 us  (20 -> 60 -> 120 -> 250).
+   length x12.5 (20->250) but gap x67  ->  consistent with the O(T^2)
+   gather copy (every decode step copies [0,t) KV out of the blocks).
+   Relative cost: ~2.6% (20) to ~3.2% (250).
+
+3) Why it matters / Lab 2 target.
+   The cost is a materialized gather over the full history. At this tiny
+   scale it is only a few percent, but the absolute cost grows O(T^2),
+   so at longer contexts it dominates. Lab 2 is about eliminating the
+   materialized gather: attend directly over blocks (block-wise /
+   online-softmax), so no full-history copy is ever materialized.
+
+================================================================
+ Caveats
+================================================================
+- 20-token point is near the noise floor: d-min=2.45us vs IQR 2.3/5.3us.
+  Signal is clean from 60 tokens up (gap >> IQR).
+- Build is Release (-O2 -DNDEBUG). With -DNDEBUG the assert_invariant()
+  checks in the hot path are compiled out. (Hardcoded -DNDEBUG is a
+  known flag-hygiene issue: should come from CMAKE_BUILD_TYPE instead;
+  to be fixed next lab.)
+- Numbers are host- and build-specific; re-measure on target hardware.
