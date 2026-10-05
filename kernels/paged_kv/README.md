@@ -1,252 +1,100 @@
-# Phase 3 · Lab 1 – Paged KV-Cache · Stage A–D Coding Spec
+# Paged KV Attention — 项目总结
 
-> 一次性给全 4 个 Stage,不逐个解锁。落盘 2026-09-11。目标语言 `C++17,写在 `OperationNiobiumLab`(WSL2 本机)。
+## 一、做了什么
 
----
+实现并验证了一条**分页 KV-cache（paged KV）的注意力推理路径**，与既有的**连续 KV-cache 路径**做**逐步数值对拍**，并测量二者的性能差异。分页 KV 的核心思想：把每条序列的 K/V 分散存进**固定大小的物理块**（如每块 4 个 token），用一张**块表（BlockTable）**把逻辑位置映射到物理块，块从**共享块池**按需分配、引用计数、归还 —— 这是 vLLM 式内存管理的基础设施，为后续的多序列共享、前缀复用、按块调度做准备。
 
-## 0. 这个 lab 在干什么
-
-Phase 2 的 KV-cache 是**每序列一整块连续内存**: `k_caches[layer]` 形状 `[max_seq_len, n_kv_heads, d_head]`,按 `pos_offset` 线性索引。它能跑,但有三个死穴:
-
-1. **必须按 `max_seq_len` 预留** —— 序列只用 20 个 token 也占 8192 个位置的内存
-2. **不能共享** —— 两个序列有相同前缀也要各存一份
-3. **不能局部释放** —— 要么整块在,要么整块没
-
-Lab 1 把它换成 **分页(paged)**:内存切成固定大小的 block,一张 block table 把逻辑 token 位置映射到物理块。这是 vLLM 的核心机制,你 K2/K3 两张知识卡读的就是它。
-
-**⚠️ 这不是一个练完就扔的 lab。** 按 2026-09-01 的收敛模型,Lab 1 写出来的 `BlockAllocator` / `BlockTable` **直接长成 AgentKV capstone 的地基**:
-
-| Lab 1 里的东西 | 在 capstone 里变成 |
-|---|---|
-| `refcount` / `pin()` / `unpin()` —— 应用层锁住不许回收的 KV | |
-| `decref` 归零的处理 | `evict_span()` —— 可回收但内容仍有效的池 |
-| `BlockTable` 快照 | `checkpoint` / `restore` —— headline demo B(backtrack) |
-
-所以下面有两处**必须留手**,写死了就等于把 capstone 的路堵上。我在 Stage A 里用 ⚠️ 标出来了。
-
-**铁律不变:** 推理热路径的 kernel 不手搓,站 FlashInfer。Lab 1 是**内存层**,不碰 attention kernel —— Stage C 允许"gather 成连续再复用 Phase 2 的 attention"这条捷径,那正是设计不是偷懒。
+产生的模块：
+- **`paged_kv`**：块分配器（`BlockAllocator`）、块表（`BlockTable`）、分页 KV 缓存（`PagedKVCache`）、序列管理。
+- **`transformer_paged`**：分页注意力前向（`attention_paged_forward`）、分页整栈前向（`forward_paged`）。
+- **测试与基准**：分页 vs 连续的对拍驱动 + 长度扫描 benchmark。
 
 ---
 
-## 1. 公共约定
+## 二、正确性：分页路径与连续路径**数值等价**
 
-```cpp
-using BlockId = int32_t;
-constexpr BlockId kInvalidBlock = -1;
-```
+### 对拍方法
+对同一 prompt（3 token），分别走：
+- **连续路径**：`transformer_forward_kv`（K/V 存在连续 buffer，按 `pos_offset` 直接偏移读写）
+- **分页路径**：`forward_paged`（K/V 写进物理块，attention 前 `gather` 出连续视图）
 
-**块内数据布局**(和 Phase 2 保持一致,`head_flat()` 可直接复用):
+**prefill 阶段**：整段 prompt 一次前向，**逐行**比对全部 `prompt_size` 行 logits（不只是最后一行 —— 中间行同样覆盖）。
+**decode 阶段**：每步新生成 1 个 token，**逐步**比对 logits 与 greedy token id。
 
-```
-block 内: [block_size, n_kv_heads, d_head]   行优先
-物理池:   k_pool[layer] = float[num_blocks * block_size * n_kv_heads * d_head]
-```
+判据：`check_close(rtol=1e-5)`，且 greedy 序列**完全相同**。
 
-**测试配置**(小到能手算):
+**结果**：两条路径在**所有** prefill 行、**所有** decode 步上数值一致（rtol=1e-5），greedy 序列逐 token 相同；`benchmark` 里三路（Non-KV / KV / Paged）输出也完全一致。
 
-```
-block_size = 4, num_blocks = 8, n_layers = 2, n_kv_heads = 2, d_head = 4
-```
+### 边界加固（都在对拍驱动里覆盖）
+- **碎片化**：3 条序列交错增长（长度 5/11/3），块在池中不连续分配；各序列写入可区分标记数据，`gather` 回读**不串**；中途释放一条序列不影响其余；全部释放后池回到初始状态。
+- **越界 / OOM**：池容量"刚好不够"时，`forward_paged` **优雅返回 false**（不崩、不越界），且 OOM 后**账目不变式仍成立**、还能正常 allocate/free。
+- **引用计数生命周期**：`clone_shared` 后析构原表，块**不回收**（克隆仍持有）；克隆独占后可读；析构克隆后块归还。
+- **非法输入**：喂错误的 `pos_offset` 时，内部断言（`NB_CHECK`）**抛异常**被捕获，验证防御生效。
 
-复用 Phase 2 已有的:`Tensor`、`NB_CHECK`、`check_close()`、`head_flat()`、`tiny_cfg`。
-(顺手把 `include/check.h` 末尾那个缺的换行补上,别再看了 4 条 warning。)
-
----
-
-## 2. Stage A – BlockAllocator + BlockTable
-
-**目标:** 只做内存簿记,不碰任何 K/V 数据。
-
-### 接口
-
-```cpp
-class BlockAllocator {
-public:
-    BlockAllocator(int num_blocks, int block_size);
-
-    BlockId allocate();                 // 无空闲 → kInvalidBlock(不抛异常)
-    void    incref(BlockId);
-    void    decref(BlockId);            // 归零 → 交给 on_zero_ref 策略,见下
-    int     refcount(BlockId) const;
-
-    int num_free() const;
-    int num_blocks() const;
-    int block_size() const;
-
-private:
-    std::vector<int> refcount_;         // [num_blocks]
-    std::vector<BlockId> free_list_;
-    int block_size_;
-};
-```
-
-### ⚠️ 留手 1 — refcount 归零 ≠ 立即 free
-
-> 最自然的写法是 `if (--refcount_[b] == 0) free_list_.push_back(b);`。**别这么写死。**
-
-> capstone 需要第三种状态:*refcount 归零、但内容仍然有效、可被 evict 也可被复活*(prefix cache 就靠这个)。所以归零时走一个可替换的分支:
-
-```cpp
-enum class ZeroRefPolicy { FreeImmediately, MoveToEvictable };
-```
-
-> Stage A **只实现 `FreeImmediately`**;`MoveToEvictable` 留个 `NB_CHECK(false, "not implemented")` 即可。但**数据结构里必须给 evictable 池留位置**(一个 `std::list<BlockId>` 或类似 evictable_ 加一个 `BlockId → 迭代器` 的索引),别等以后再回来改结构。
-
-> 判断标准:以后加 evict 时,应该只改策略分支,不改 `BlockAllocator` 的成员布局。
-
-```cpp
-class BlockTable {
-public:
-    explicit BlockTable(BlockAllocator* alloc);
-    ~BlockTable();                       // 对所有持有块 decref
-
-    bool ensure_capacity(int num_tokens);      // 按需 allocate;不够返回 false 且不留半成品
-    std::pair<BlockId,int> locate(int token_pos) const;  // → (block_id, offset_in_block)
-    void append_tokens(int n);            // 逻辑长度 += n(调用前须 ensure)
-
-    int num_tokens() const;
-    const std::vector<BlockId>& blocks() const;
-
-    BlockTable clone_shared() const;      // ⚠️ 留手 2,见下
-
-private:
-    BlockAllocator* alloc_;
-    std::vector<BlockId> blocks_;
-    int num_tokens_ = 0;
-};
-```
-
-### ⚠️ 留手 2 — BlockTable 必须可拷贝/可快照
-
-> `clone_shared()` 拷贝 `blocks_` 这个**块号列表**,并对每个块 `incref()` —— **不拷贝任何 K/V 数据**。两张表从此指向同一批物理块,refcount 都是 2。
-
-> 这是 capstone 里 `checkpoint()` 的原型,也是 headline demo B(backtrack)的全部机制。写起来只有五行,但如果 Stage A 把 `BlockTable` 做成不可拷贝的(比如 `unique_ptr` 持有块),后面就得整个重写。
-
-> Stage A **不需要**实现写时复制(COW 分裂) —— 那是 capstone 的话。这里只要 `incref` 语义正确。
-
-### 验收判据
-
-- [ ] 分配满 8 块后 `num_free()==0`,再 `allocate()` 返回 `kInvalidBlock`(不崩、不抛)
-- [ ] `decref` 到 0 → 块回 free list,`num_free()` 恢复
-- [ ] `block_size=4` 时: `locate(0)==(b0,0)`, `locate(3)==(b0,3)`, `locate(4)==(b1,0)`, `locate(7)==(b1,3)`
-- [ ] `ensure_capacity` 失败时**不能留下半分配状态**(要么全成功要么全回滚)
-- [ ] `clone_shared()` 后每块 `refcount()==2`;原表析构后克隆表的 `locate()` 仍然有效
-- [ ] 所有表析构后 `num_free() == num_blocks`(零泄漏)
+配套地，块分配器补了一个**记账不变式** `check_invariant()`（计数自洽、free list 无重复/不重叠/不丢失），并在热路径上把调试期检查用 `#ifndef NDEBUG` 包住。
 
 ---
 
-## 3. Stage B – Cache 读写
+## 三、性能：分页的代价，以及它**到底是什么**
 
-**目标:** 有了簿记,现在真把 K/V 塞进块、再取回来。
+### 测量方法（关键）
+- **Release 构建**（`-O2 -DNDEBUG`）。
+- 扫描上下文长度：**new_tokens = 20 / 60 / 120 / 250**。
+- 每配置 **warmup + 100 次计时**，报 **min / median / IQR**。
+- **环境构造（allocator / table / cache）放在计时区外**，两条路径对齐；每次运行前重置分页表（不计时）。
 
-```cpp
-class PagedKVCache {
-public:
-    PagedKVCache(int n_layers, int n_kv_heads, int d_head,
-                 int num_blocks, int block_size);
+### 结果（`d-min` = 分页减连续的绝对差）
 
-    // 把逻辑位置 [start_pos, start_pos+n) 的 K/V 写进 table 指向的块
-    void write(int layer, const BlockTable& table, int start_pos,
-               const float* k_src, const float* v_src, int n_tokens);
+| new_tokens | KV min/med (µs) | Paged min/med (µs) | **d-min (µs)** | 相对 |
+|---|---|---|---|---|
+| 20 | 94.3 / 95.6 | 96.8 / 98.4 | **2.45** | ~2.6% |
+| 60 | 434.3 / 440.8 | 445.6 / 452.6 | **11.36** | ~2.6% |
+| 120 | 1409.2 / 1429.5 | 1443.2 / 1463.2 | **34.01** | ~2.4% |
+| 250 | 5171.7 / 5219.3 | 5335.2 / 5390.2 | **163.53** | ~3.2% |
 
-    // 把逻辑位置 [0, num_tokens) 的 K/V 收集成连续缓冲
-    void gather(int layer, const BlockTable& table, int num_tokens,
-                float* k_dst, float* v_dst) const;
+**min 与 median 高度一致** → 差值真实、不是抖动（20 token 点接近噪声下限，≥60 信号清晰）。
 
-    // 裸块指针(Stage C / 将来 Lab 2 用)
-    float*       k_block(int layer, BlockId b);
-    const float* k_block(int layer, BlockId b) const;
-    float*       v_block(int layer, BlockId b);
-    const float* v_block(int layer, BlockId b) const;
+### 分析（经过一轮修正，这是最终结论）
 
-private:
-    std::vector<std::vector<float>> k_pool_, v_pool_;  // [n_layers][num_blocks*block_size*n_kv_heads*d_head]
-    int n_kv_heads_, d_head_, block_size_;
-};
-```
+**1. 代价的构成：内存分配 ≈ 一半，物化 gather ≈ 一半。**
+初测差距 6.0 µs 里，约 **53% 来自每次生成在注意力内部反复 `new` 临时 K/V 缓冲**（每层每步各一次，还带零初始化）——把这块缓冲**提升为可复用的常驻 scratch**后回收了约 3.2 µs；**剩余的 ~47% 才是 gather 本身**。所以"分页慢"既不是"全是 malloc"，也不是"全是拷贝"，而是**各占一半**，修复分配后**只剩下 gather 是固有代价**。
 
-**写的时候会踩的坑:** `start_pos` 未必落在块边界上。一次 `write(n_tokens)` 通常要拆成 3 段:当前块的剩余尾巴 → 若干整块 → 最后一块的头。把这个拆分逻辑单独抽成一个函数,Stage C 还要用。
+**2. gather 就是那次拷贝 —— 证据是"有效带宽"，不是增长指数。**
+把差值除以理论拷贝量（每步每层拷 `2·t·n_kv_heads·d_head` 个 float，全程约 `64·T²` 字节），得到**有效带宽**：
 
-### 验收判据
+| T | 拷贝量 | d-min | 有效带宽 |
+|---|---|---|---|
+| 20 | 25.6 KB | 2.45 µs | 10.4 GB/s |
+| 60 | 230 KB | 11.36 µs | 20.3 GB/s |
+| 120 | 922 KB | 34.01 µs | 27.1 GB/s |
+| 250 | 4.0 MB | 163.53 µs | 24.5 GB/s |
 
-- [ ] 写 17 个 token(`block_size=4` → 跨 5 块)再 `gather`,结果与源 **bit-identical**
-- [ ] 跨块边界正确 —— 第 4 个和第 5 个 token 分属不同块,值不串
-- [ ] 两个 `BlockTable` 用同一 allocator,**交错分配**(A 拿 2 块 → B 拿 2 块 → A 再拿 2 块),各自 `gather` 出来的数据互不污染。**这条是分页的核心价值,别跳过**
-- [ ] `write` 越过 `table.num_tokens()` 能覆盖的范围 → `NB_CHECK` 拦住
+带宽从 10 GB/s 上升、在 ~25 GB/s 饱和 —— **典型的 memcpy 曲线**（小拷贝被每次调用开销主导，大拷贝受 L2/L3 带宽封顶）。因此拟合指数是 **1.66**（不是 2）**并不是反例**：它恰恰说明"差就是那次拷贝"，只是**拷贝越大越高效**，所以看起来"亚二次"。（逐段指数 1.40 → 1.58 → 2.14，末段已超过 2。）
 
----
-
-## 4. Stage C – 增量 decode
-
-**目标:** 接通真实的 prefill / decode 循环,和 Phase 2 的 `Transformer` 打通。
-
-```cpp
-// 每步(prefill n 个 / decode 1 个)统一入口:确保容量 → 写入 → 推进逻辑长度
-bool append_kv(PagedKVCache& cache, BlockTable& table, int layer,
-               const float* k_new, const float* v_new, int n_new);
-
-// paged attention(Stage C 版:gather → 复用 Phase 2 的 attention)
-void attention_paged(const Tensor& q, const PagedKVCache& cache,
-                     const BlockTable& table, int layer,
-                     Tensor& out, int n_heads, int n_kv_heads, int d_head);
-```
-
-**明确允许的捷径:** `attention_paged` 先 `gather()` 成连续 K/V,再直接调 Phase 2 的 `attention_forward_kv`。
-
-**这不是偷懒,是分层。** Lab 1 只负责"内存怎么组织",attention 怎么在分页上直接算(不 gather)是 **Lab 2** 的事,而在 capstone 里那一层最终会换成 FlashInfer。现在手搓 `paged attention` kernel 既踩铁律,又会让 Stage D 的对比同时验两件事,出问题分不清是谁的锅。
-
-**代价要记下来:** gather 每步都拷一遍全部历史 KV,所以 Stage C 的 `paged 路径`**会比 Phase 2 的连续 KV 慢**。这是预期内的。Stage D 要把这个数字量出来 —— 它就是 Lab 2 存在的理由。
-
-### 验收判据
-
-- [ ] `prompt=3 + 20 步 decode`,paged 路径与 Phase 2 连续 KV 路径的 **logits 逐步一致**,`check_close(rtol=1e-5)`(直接复用 `compare_stepwise_logits()`)
-- [ ] `greedy` 采出的 token id 序列**完全相同**
-- [ ] 块用量 == `ceil(23 / block_size)`,一块不多
-- [ ] 序列结束后释放后 `num_free()` 回到初值
-- [ ] 中途 `allocate()` 失败(把 `num_blocks` 调到刚好不够)→ 优雅返回 `false`,不越界写、不崩
+**3. 相对代价是"平的"（~3%），并不随长度上升。**
+因为**连续基线本身也接近 O(T²)**（其增长指数 1.39 / 1.70 / 1.77）—— 分子分母同阶，比值几乎不动。所以**不能**说"gather 最终会压倒一切"。
 
 ---
 
-## 5. Stage D – 对拍 + 边界
+## 四、这个 lab 的真正结论
 
-**目标:** 证明它真的对,以及在边界上不会烂。
+> **分页的代价是一个稳定的 ~3% 的额外开销，它换来的是零算术收益。**
+>
+> 具体来说，它把一个**全历史 K/V 拷贝**，在**每层、每个 decode 步**都**物化一遍**，纯粹是为了交给注意力计算一个"连续的内存视图"。**真正的代价是内存带宽**（以及批处理下的带宽争用），**不是渐近爆炸** —— 那个"渐近版"的说法是可证伪的，且已被本数据证伪。
 
-### 必做的五组测试
+**为什么要如实说清这一点**：把结论定性成"物化 gather 的 O(T²) 会最终主导"是**站不住的**（本数据反驳了它）；而"paged 付出了固定的带宽代价、却没有省下任何算术"才是**测量真正支持**的说法。
 
-1. **数值对拍** —— paged vs Phase 2 连续 cache,逐 token logits `rtol=1e-5`,这是 Stage D 的主判据。
-2. **碎片化** —— 3 个序列长度不同(比如 5 / 11 / 3 个 token),**交错**分配和释放,验证:数据不串、`num_free()` 账目正确、最后全部归还。
-3. **越界 / OOM** —— `ensure_capacity` 超过 `num_blocks`:返回 false,不写越界,allocator 状态未被破坏(后续正常分配仍能工作)。
-4. **refcount 生命周期** —— `clone_shared()` 出一张表 → 析构原表 → 克隆表的数据仍然正确可读 → 析构克隆表 → 块归还。
-5. **Benchmark** —— paged vs 连续 KV 的 20-token decode 耗时。**非 KV 侧也要加 warmup + median**(Phase 2 那个 benchmark 只给 KV 侧加了,数字系统性偏向 KV,别把这个毛病带过来)。
-
-### 验收判据
-
-- [ ] 五组全绿
-- [ ] benchmark 数字记进 `benchmarks/`,并在 README 里写一句**为什么 paged 更慢** —— 说不清就是没真懂 gather 的代价
-- [ ] fresh clone + `cmake` clean build 零 error(Phase 2 在这里栽过一次)
+因此顺理成章的下一步方向是：**消除这次物化** —— 不把历史 K/V 拷出来，而是**直接在物理块上做注意力**（分块注意力 / online-softmax），让那次全程拷贝**根本不再发生**，从而既省带宽，又为"在块上做调度、共享、复用"打开空间。
 
 ---
 
-## 6. Ruthless-trim 砍点
+## 五、交付物
 
-时间不够时按这个顺序砍:
-
-**可以砍:**
-1. `MoveToEvictable` 策略的**真实实现**(接口和数据结构位置必须留,见留手 1)
-2. `clone_shared()` 的**写时复制分裂** —cl— 只做 `incref` 就够了
-3. 多序列 batching —— Stage D 第 2 组的交错测试已经覆盖了核心风险
-4. Benchmark 的精细化(median/多轮),单次冷跑也能说明趋势
-
-**不能砍:**
-- `refcount` 本身
-- `locate()` 的跨块正确性
-- Stage D 第 1 组(数值对拍) —— 砍了这个整个 lab 就没有验收了
-- 两处留手的**接口形状**
+- **正确的分页推理路径**：与连续 KV 逐行、逐步等价（rtol=1e-5），三路生成输出一致。
+- **健壮的块管理**：分配 / 引用计数 / 克隆共享 / 归还，带**可验证的记账不变式**；碎片、OOM、非法输入均有覆盖。
+- **可复现的性能记录**：长度扫描 + min/median/IQR + 带宽分析，以及**一轮被如实记录的纠错**（从"malloc 主因"到"malloc 与 gather 各半"，再到"用带宽确认 gather"）。
+- **已知遗留**：构建里 `-DNDEBUG` 目前硬编码，应改由构建类型（`CMAKE_BUILD_TYPE`）驱动；调试期断言在 release 下被编译掉。列为后续处理项。
 
 ---
 
-## 7. 打勾规则
-
-`phase3-schedule.md` 里 Lab 1 的四个 Stage,**只有你亲口说"做完了"我才打 `[x]`**。cron 每天推的是进度卡,不代打、不越级。
-
-`niobium-main` cron 周 — 08:00 PDT 恢复,第一张就是 Stage A 的进度卡。你这个周末先写也行,推的时候我按你实际进度调。
+**一句话**：**做了一条能跑、且与连续 KV 数值完全一致的分页注意力路径，并把它的代价测清楚 —— 稳定的 ~3% 带宽开销，来源是每层每步物化的一份全程 K/V 拷贝；这既验证了分页管理基础设施的正确性，也精确指出了下一步该优化的地方。**

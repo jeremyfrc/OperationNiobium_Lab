@@ -295,3 +295,71 @@ Why it matters / Lab2:
   known flag-hygiene issue: should come from CMAKE_BUILD_TYPE instead;
   to be fixed next lab.)
 - Numbers are host- and build-specific; re-measure on target hardware.
+
+========================================================================
+REVISED ANALYSIS (supersedes points 1-3 of "NEW Analysis")
+========================================================================
+Three corrections after re-deriving the numbers. R2 is the one thatturns the O(T^2) claim from an assertion into a measurement; R3reverses the Lab 2 framing.
+
+R1.
+Malloc was about HALF the original gap, not almost all of it.    
+before fix : 101.935 - 95.898 = 6.04 us    
+after fix : 98.410 - 95.600 = 2.82 us (d-min 2.45 us)    
+The KV column barely moved (95.90 -> 95.60), so aligning the timer    
+changed almost nothing and the two runs are comparable. Hoisting    
+k_buf/v_buf therefore recovered ~3.2 us of 6.0 us, i.e. ~53%.    
+The remaining ~47% is the gather itself. Point 1 above claims the    
+penalty is "NOT malloc"; the correct statement is that malloc and    
+gather were roughly half each, and only gather is left.
+
+R2.
+The gap IS the gather copy. The evidence is effective bandwidth,    
+not the growth exponent.    
+A pure T^2 law predicts 12.5x length -> 156x gap. Observed is 67x,    
+so the fitted exponent is log(67)/log(12.5) = 1.66, not 2. Segment    
+by segment it is still climbing: 1.40 (20->60), 1.58 (60->120),    
+2.14 (120->250). Quoting "x67, consistent with O(T^2)" overstates    
+a 2.3x miss.
+
+Dividing the gap by the theoretical copy volume resolves it. Each    
+decode step at position t gathers 2*t*n_kv_heads*d_head floats    
+(K and V) per layer = 128t bytes over 2 layers, so the whole run    
+copies sum(128t) ≈ 64*T^2 bytes.
+
+T copy volume gap (d-min) effective bandwidth      
+20 25.6 KB 2.45 us 10.4 GB/s      
+60 230 KB 11.36 us 20.3 GB/s      
+120 922 KB 34.01 us 27.1 GB/s      
+250 4.0 MB 163.53 us 24.5 GB/s
+
+Bandwidth rises from 10 GB/s and saturates near 25 GB/s: a textbook
+memcpy curve, per-call overhead dominating small copies and L2/L3
+bandwidth capping large ones. So the sub-quadratic exponent is not
+a counter-example, it is the confirmation. The gap is exactly that
+copy; it only looks sub-quadratic because memcpy gets more
+efficient as the copy grows.
+
+R3.
+The RELATIVE cost is flat, not growing. Point 3 is contradicted by
+this table's own numbers.
+paged overhead: 2.60% (20) 2.62% (60) 2.41% (120) 3.16% (250)
+It does not trend up, because the contiguous baseline is itself
+~O(T^2) here: its growth exponent is 1.39, 1.70, 1.77 over the same
+three intervals. Numerator and denominator are the same order, so
+the ratio barely moves.
+
+Lab 2 therefore cannot be motivated by "gather eventually dominates"
+-- this data says it does not, at least not on this shape. The
+honest motivation:
+
+Paging costs a steady ~3% that buys no arithmetic at all. It is a
+full-history copy materialized once per layer per decode step,
+purely to hand attention a contiguous buffer. The real price is
+memory bandwidth and, under batching, bandwidth contention -- not
+an asymptotic blow-up. Lab 2 removes the materialization: attend
+directly over the blocks (block-wise / online-softmax) so the
+copy never happens.
+
+Getting this right matters because the asymptotic version of the
+claim is falsifiable and already falsified above; the bandwidth
+version is what the measurement actually supports.
